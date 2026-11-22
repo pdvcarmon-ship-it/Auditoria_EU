@@ -17,7 +17,7 @@ nav button.on{color:#16a34a;font-weight:700;border-top:3px solid #16a34a}
 .modal{position:fixed;inset:0;background:#0007;z-index:2000;display:none;align-items:center;justify-content:center;padding:12px}
 .card{background:#fff;border-radius:12px;padding:16px;width:100%;max-width:460px;max-height:90vh;overflow:auto}
 input,select{width:100%;padding:10px;margin:4px 0;border:1px solid #ccc;border-radius:8px;font-size:15px}
-.row{display:flex;gap:6px}.row input{flex:2}.row select{flex:1}
+.row{display:flex;gap:6px}.row .ref{flex:2}.row .tipo{flex:1}
 .btn{padding:10px 14px;border:0;border-radius:8px;background:#16a34a;color:#fff;font-size:14px;margin:4px 4px 0 0}
 .btn.g{background:#e5e7eb;color:#111}.btn.b{background:#2563eb}.btn.r{background:#dc2626}
 .exp{border:1px solid #ddd;border-radius:10px;padding:12px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;gap:8px}
@@ -49,6 +49,7 @@ input,select{width:100%;padding:10px;margin:4px 0;border:1px solid #ccc;border-r
 <div class="modal" id="addModal"><div class="card">
  <h3>Añadir expediente</h3>
  <input id="expName" placeholder="Nombre del expediente">
+ <datalist id="tiposList"></datalist>
  <div id="rows"></div>
  <button class="btn g" id="addRow">+ Parcela</button>
  <div style="margin-top:12px"><button class="btn" id="save">Guardar</button><button class="btn g" id="cancel">Cancelar</button></div>
@@ -62,11 +63,12 @@ input,select{width:100%;padding:10px;margin:4px 0;border:1px solid #ccc;border-r
 <script>
 // ====== CONFIG ======
 const CFG={
- SUPABASE_URL:'https://nodyssmvqnbrrthrniwn.supabase.co/rest/v1/',
+ SUPABASE_URL:'https://nodyssmvqnbrrthrniwn.supabase.co',
  SUPABASE_KEY:'sb_publishable_RM5C0Ae-2VniCoAp3JHlag_mIz07Z36',
  BACKEND_URL:'https://auditoria-back-9ga7.onrender.com', // solo fallback para SIGPAC (CORS)
  BUCKET:'fotos'
 };
+const norm=t=>{t=t.trim();return t?t[0].toUpperCase()+t.slice(1).toLowerCase():''};
 const TIPOS=['Olivar','Cítrico','Cereal','Viñedo','Frutal','Hortícola','Otro'];
 const COLOR={pendiente:'#22c55e',en_curso:'#eab308',finalizado:'#ef4444'};
 const sb=supabase.createClient(CFG.SUPABASE_URL,CFG.SUPABASE_KEY);
@@ -105,6 +107,7 @@ function buildFilters(){
  $('fExp').innerHTML=opt('','Todos')+EXPS.map(e=>opt(e.id,e.nombre)).join('');
  const tipos=[...new Set(PARS.map(p=>p.tipo).filter(Boolean))];
  $('fTipo').innerHTML=opt('','Todos')+tipos.map(t=>opt(t,t)).join('');
+ $('tiposList').innerHTML=[...new Set([...TIPOS,...tipos])].map(t=>`<option value="${t}">`).join('');
  $('fExp').value=F.exp;$('fTipo').value=F.tipo;$('fEstado').value=F.estado;
 }
 $('filtBtn').onclick=()=>{const f=$('filt');f.style.display=f.style.display==='block'?'none':'block'};
@@ -165,7 +168,7 @@ async function finalizar(p){
 // ====== AÑADIR EXPEDIENTE ======
 function addRow(){
  const d=document.createElement('div');d.className='row';
- d.innerHTML=`<input class="ref" placeholder="Ref. SIGPAC (41:091:0:0:12:34:1)"><select class="tipo">${TIPOS.map(t=>`<option>${t}</option>`).join('')}</select>`;
+ d.innerHTML=`<input class="ref" placeholder="Ref. SIGPAC (41:091:0:0:12:34:1)"><input class="tipo" list="tiposList" placeholder="Tipo (ej. Olivar)">`;
  $('rows').appendChild(d);
 }
 $('fab').onclick=()=>{$('expName').value='';$('rows').innerHTML='';addRow();$('addModal').style.display='flex'};
@@ -184,7 +187,7 @@ async function getGeom(ref){
 }
 $('save').onclick=async()=>{
  const nombre=$('expName').value.trim();
- const rows=[...document.querySelectorAll('#rows .row')].map(r=>({ref:r.querySelector('.ref').value.trim(),tipo:r.querySelector('.tipo').value})).filter(r=>r.ref);
+ const rows=[...document.querySelectorAll('#rows .row')].map(r=>({ref:r.querySelector('.ref').value.trim(),tipo:norm(r.querySelector('.tipo').value)})).filter(r=>r.ref);
  if(!nombre||!rows.length)return toast('Pon nombre y al menos una parcela');
  $('save').disabled=true;toast('Buscando parcelas en SIGPAC…');
  try{
