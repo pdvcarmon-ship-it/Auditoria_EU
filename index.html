@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="es"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Expedientes</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+*{box-sizing:border-box}html,body{height:100%;margin:0;font-family:system-ui,sans-serif}
+#app{display:flex;flex-direction:column;height:100%}
+main{flex:1;position:relative;min-height:0}
+#map{position:absolute;inset:0}
+#downloads{display:none;padding:16px;overflow:auto;height:100%}
+nav{display:flex;border-top:1px solid #ddd;background:#fff;padding-bottom:env(safe-area-inset-bottom)}
+nav button{flex:1;padding:14px;border:0;background:none;font-size:15px}
+nav button.on{color:#16a34a;font-weight:700;border-top:3px solid #16a34a}
+#fab{position:absolute;right:16px;bottom:16px;z-index:1000;width:56px;height:56px;border-radius:50%;border:0;background:#16a34a;color:#fff;font-size:32px;box-shadow:0 2px 8px #0005}
+.modal{position:fixed;inset:0;background:#0007;z-index:2000;display:none;align-items:center;justify-content:center;padding:12px}
+.card{background:#fff;border-radius:12px;padding:16px;width:100%;max-width:460px;max-height:90vh;overflow:auto}
+input,select{width:100%;padding:10px;margin:4px 0;border:1px solid #ccc;border-radius:8px;font-size:15px}
+.row{display:flex;gap:6px}.row input{flex:2}.row select{flex:1}
+.btn{padding:10px 14px;border:0;border-radius:8px;background:#16a34a;color:#fff;font-size:14px;margin:4px 4px 0 0}
+.btn.g{background:#e5e7eb;color:#111}.btn.b{background:#2563eb}.btn.r{background:#dc2626}
+.exp{border:1px solid #ddd;border-radius:10px;padding:12px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+#msg{position:fixed;top:10px;left:50%;transform:translateX(-50%);background:#111;color:#fff;padding:8px 14px;border-radius:8px;z-index:3000;display:none;font-size:14px}
+#geo{position:absolute;right:16px;bottom:84px;z-index:1000;width:48px;height:48px;border-radius:50%;border:0;background:#fff;font-size:22px;box-shadow:0 2px 8px #0005}
+#filtBtn{position:absolute;left:12px;top:12px;z-index:1000;padding:10px 14px;border:0;border-radius:20px;background:#fff;font-size:14px;box-shadow:0 2px 8px #0005}
+#filt{position:absolute;left:12px;top:56px;z-index:1000;background:#fff;border-radius:12px;padding:12px;width:230px;box-shadow:0 2px 8px #0005;display:none}
+#filt label{font-size:12px;color:#555}
+</style></head>
+<body>
+<div id="app">
+ <main>
+  <div id="map"></div>
+  <button id="fab" title="Añadir expediente">+</button>
+  <button id="geo" title="Mi ubicación">&#128205;</button>
+  <button id="filtBtn">Filtros</button>
+  <div id="filt">
+   <label>Expediente</label><select id="fExp"></select>
+   <label>Tipo</label><select id="fTipo"></select>
+   <label>Estado del expediente</label>
+   <select id="fEstado"><option value="">Todos</option><option value="pendiente">Pendiente (verde)</option><option value="en_curso">En curso (amarillo)</option><option value="finalizado">Finalizado (rojo)</option></select>
+   <button class="btn g" id="fClear">Limpiar</button>
+  </div>
+  <div id="downloads"><h2>Descargas por expediente</h2><div id="exps"></div></div>
+ </main>
+ <nav><button id="t1" class="on">Mapa</button><button id="t2">Descargas</button></nav>
+</div>
+
+<div class="modal" id="addModal"><div class="card">
+ <h3>Añadir expediente</h3>
+ <input id="expName" placeholder="Nombre del expediente">
+ <div id="rows"></div>
+ <button class="btn g" id="addRow">+ Parcela</button>
+ <div style="margin-top:12px"><button class="btn" id="save">Guardar</button><button class="btn g" id="cancel">Cancelar</button></div>
+</div></div>
+<input type="file" id="file" accept="image/*" capture="environment" hidden>
+<div id="msg"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script>
+// ====== CONFIG ======
+const CFG={
+ SUPABASE_URL:'https://TU-PROYECTO.supabase.co',
+ SUPABASE_KEY:'TU_ANON_KEY',
+ BACKEND_URL:'https://TU-BACKEND.onrender.com', // solo fallback para SIGPAC (CORS)
+ BUCKET:'fotos'
+};
+const TIPOS=['Olivar','Cítrico','Cereal','Viñedo','Frutal','Hortícola','Otro'];
+const COLOR={pendiente:'#22c55e',en_curso:'#eab308',finalizado:'#ef4444'};
+const sb=supabase.createClient(CFG.SUPABASE_URL,CFG.SUPABASE_KEY);
+const $=id=>document.getElementById(id);
+const toast=t=>{const m=$('msg');m.textContent=t;m.style.display='block';clearTimeout(toast.t);toast.t=setTimeout(()=>m.style.display='none',2500)};
+
+const map=L.map('map').setView([37.4,-5.98],8);
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'Esri'}).addTo(map);
+const layer=L.featureGroup().addTo(map);
+let EXPS=[],PARS=[],FOTOS=[],currentPar=null;
+
+async function load(){
+ const [e,p,f]=await Promise.all([
+  sb.from('expedientes').select('*').order('created_at'),
+  sb.from('parcelas').select('*'),
+  sb.from('fotos').select('*').order('created_at')]);
+ if(e.error||p.error||f.error)return toast('Error cargando datos');
+ EXPS=e.data;PARS=p.data;FOTOS=f.data;buildFilters();draw();renderExps();
+}
+const expName=id=>(EXPS.find(x=>x.id===id)||{}).nombre||'';
+const nFotos=pid=>FOTOS.filter(f=>f.parcela_id===pid).length;
+
+const F={exp:'',tipo:'',estado:''};
+function expEstado(id){
+ const ps=PARS.filter(p=>p.expediente_id===id);
+ if(!ps.length)return 'pendiente';
+ if(ps.every(p=>p.estado==='finalizado'))return 'finalizado';
+ if(ps.every(p=>p.estado==='pendiente'))return 'pendiente';
+ return 'en_curso';
+}
+function pasa(p){
+ return(!F.exp||p.expediente_id===F.exp)&&(!F.tipo||p.tipo===F.tipo)&&(!F.estado||expEstado(p.expediente_id)===F.estado);
+}
+function buildFilters(){
+ const opt=(v,t)=>`<option value="${v}">${t}</option>`;
+ $('fExp').innerHTML=opt('','Todos')+EXPS.map(e=>opt(e.id,e.nombre)).join('');
+ const tipos=[...new Set(PARS.map(p=>p.tipo).filter(Boolean))];
+ $('fTipo').innerHTML=opt('','Todos')+tipos.map(t=>opt(t,t)).join('');
+ $('fExp').value=F.exp;$('fTipo').value=F.tipo;$('fEstado').value=F.estado;
+}
+$('filtBtn').onclick=()=>{const f=$('filt');f.style.display=f.style.display==='block'?'none':'block'};
+['fExp','fTipo','fEstado'].forEach(id=>$(id).onchange=()=>{
+ F.exp=$('fExp').value;F.tipo=$('fTipo').value;F.estado=$('fEstado').value;
+ draw.fit=0;draw();
+ $('filtBtn').textContent=(F.exp||F.tipo||F.estado)?'Filtros ●':'Filtros';
+});
+$('fClear').onclick=()=>{F.exp=F.tipo=F.estado='';buildFilters();draw.fit=0;draw();$('filtBtn').textContent='Filtros'};
+
+function draw(){
+ layer.clearLayers();
+ PARS.forEach(p=>{
+  if(!p.geom||!pasa(p))return;
+  const c=COLOR[p.estado]||COLOR.pendiente;
+  L.geoJSON(p.geom,{style:{color:c,fillColor:c,fillOpacity:.45,weight:2}})
+   .on('click',()=>openPopup(p)).addTo(layer);
+ });
+ if(layer.getLayers().length&&!draw.fit){map.fitBounds(layer.getBounds(),{maxZoom:17});draw.fit=1}
+}
+
+function centroid(p){const b=L.geoJSON(p.geom).getBounds().getCenter();return b}
+function openPopup(p){
+ const el=document.createElement('div');
+ const n=nFotos(p.id);
+ el.innerHTML=`<b>SIGPAC:</b> ${p.ref_sigpac}<br><b>Expediente:</b> ${expName(p.expediente_id)}<br><b>Tipo:</b> ${p.tipo||'-'}<br><b>Fotos:</b> ${n}<br>`;
+ const add=(t,cls,fn)=>{const b=document.createElement('button');b.className='btn '+cls;b.textContent=t;b.onclick=fn;el.appendChild(b)};
+ const c=centroid(p);
+ add('Ir','b',()=>window.open(`https://www.google.com/maps/dir/?api=1&destination=${c.lat},${c.lng}&travelmode=driving`,'_blank'));
+ add('Añadir foto','',()=>{currentPar=p;$('file').click()});
+ if(n>0&&p.estado!=='finalizado')add('Finalizado','r',()=>finalizar(p));
+ L.popup().setLatLng(c).setContent(el).openOn(map);
+}
+
+// ====== FOTOS ======
+function resize(file,max=1600){return new Promise(async res=>{
+ const bm=await createImageBitmap(file);const k=Math.min(1,max/Math.max(bm.width,bm.height));
+ const cv=document.createElement('canvas');cv.width=bm.width*k;cv.height=bm.height*k;
+ cv.getContext('2d').drawImage(bm,0,0,cv.width,cv.height);cv.toBlob(res,'image/jpeg',.85)})}
+$('file').onchange=async e=>{
+ const f=e.target.files[0];e.target.value='';if(!f||!currentPar)return;
+ const p=currentPar;toast('Subiendo foto…');
+ const blob=await resize(f);
+ const path=`${p.expediente_id}/${p.id}/${Date.now()}.jpg`;
+ const up=await sb.storage.from(CFG.BUCKET).upload(path,blob,{contentType:'image/jpeg'});
+ if(up.error)return toast('Error subiendo foto');
+ const ins=await sb.from('fotos').insert({parcela_id:p.id,expediente_id:p.expediente_id,path});
+ if(ins.error)return toast('Error guardando foto');
+ if(p.estado==='pendiente')await sb.from('parcelas').update({estado:'en_curso'}).eq('id',p.id);
+ map.closePopup();await load();toast('Foto guardada');
+};
+async function finalizar(p){
+ if(!confirm('¿Marcar parcela como finalizada?'))return;
+ await sb.from('parcelas').update({estado:'finalizado'}).eq('id',p.id);
+ map.closePopup();load();
+}
+
+// ====== AÑADIR EXPEDIENTE ======
+function addRow(){
+ const d=document.createElement('div');d.className='row';
+ d.innerHTML=`<input class="ref" placeholder="Ref. SIGPAC (41:091:0:0:12:34:1)"><select class="tipo">${TIPOS.map(t=>`<option>${t}</option>`).join('')}</select>`;
+ $('rows').appendChild(d);
+}
+$('fab').onclick=()=>{$('expName').value='';$('rows').innerHTML='';addRow();$('addModal').style.display='flex'};
+$('addRow').onclick=addRow;
+$('cancel').onclick=()=>$('addModal').style.display='none';
+
+async function getGeom(ref){
+ const p=ref.split(/[:\-\s,.\/]+/).filter(Boolean);
+ if(p.length<6)throw new Error('Referencia incompleta');
+ const path=p.length>=7?`recinfo/${p.slice(0,7).join('/')}`:`recinfoparc/${p.slice(0,6).join('/')}`;
+ let j;
+ try{const r=await fetch(`https://sigpac-hubcloud.es/servicioconsultassigpac/query/${path}.geojson`);if(!r.ok)throw 0;j=await r.json()}
+ catch{const r=await fetch(`${CFG.BACKEND_URL}/sigpac/${p.slice(0,7).join('/')}`);if(!r.ok)throw new Error('No encontrada: '+ref);j=await r.json()}
+ const f=(j.features||[j])[0];if(!f||!f.geometry)throw new Error('Sin geometría: '+ref);
+ return f.geometry;
+}
+$('save').onclick=async()=>{
+ const nombre=$('expName').value.trim();
+ const rows=[...document.querySelectorAll('#rows .row')].map(r=>({ref:r.querySelector('.ref').value.trim(),tipo:r.querySelector('.tipo').value})).filter(r=>r.ref);
+ if(!nombre||!rows.length)return toast('Pon nombre y al menos una parcela');
+ $('save').disabled=true;toast('Buscando parcelas en SIGPAC…');
+ try{
+  const geoms=await Promise.all(rows.map(r=>getGeom(r.ref)));
+  const {data:ex,error}=await sb.from('expedientes').insert({nombre}).select().single();
+  if(error)throw error;
+  const {error:e2}=await sb.from('parcelas').insert(rows.map((r,i)=>({expediente_id:ex.id,ref_sigpac:r.ref,tipo:r.tipo,geom:geoms[i],estado:'pendiente'})));
+  if(e2)throw e2;
+  $('addModal').style.display='none';draw.fit=0;await load();toast('Expediente guardado');
+ }catch(e){toast(e.message||'Error')}
+ $('save').disabled=false;
+};
+
+// ====== DESCARGAS ======
+function renderExps(){
+ $('exps').innerHTML='';
+ EXPS.forEach(e=>{
+  const n=FOTOS.filter(f=>f.expediente_id===e.id).length;
+  const d=document.createElement('div');d.className='exp';
+  d.innerHTML=`<div><b>${e.nombre}</b><br><small>${n} fotos</small></div>`;
+  const b=document.createElement('button');b.className='btn';b.textContent='Descargar ZIP';b.disabled=!n;
+  b.onclick=()=>zipExp(e,b);d.appendChild(b);$('exps').appendChild(d);
+ });
+}
+async function caption(blob,text){
+ const bm=await createImageBitmap(blob);const h=Math.max(40,bm.height*.06);
+ const cv=document.createElement('canvas');cv.width=bm.width;cv.height=bm.height+h;
+ const x=cv.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,cv.width,cv.height);
+ x.drawImage(bm,0,0);x.fillStyle='#111';x.font=`bold ${h*.45}px sans-serif`;x.textBaseline='middle';
+ x.fillText(text,12,bm.height+h/2,cv.width-24);
+ return new Promise(r=>cv.toBlob(r,'image/jpeg',.9));
+}
+async function zipExp(e,btn){
+ const txt=btn.textContent;btn.disabled=true;
+ const zip=new JSZip();const fs=FOTOS.filter(f=>f.expediente_id===e.id);const cnt={};
+ for(let i=0;i<fs.length;i++){
+  btn.textContent=`${i+1}/${fs.length}`;
+  const par=PARS.find(p=>p.id===fs[i].parcela_id);const ref=par?par.ref_sigpac:'sin-ref';
+  const url=sb.storage.from(CFG.BUCKET).getPublicUrl(fs[i].path).data.publicUrl;
+  try{
+   const blob=await (await fetch(url)).blob();
+   const out=await caption(blob,`${e.nombre} · SIGPAC ${ref}`);
+   const key=ref.replace(/[^\w]+/g,'_');cnt[key]=(cnt[key]||0)+1;
+   zip.file(`${key}_${cnt[key]}.jpg`,out);
+  }catch{}
+ }
+ const z=await zip.generateAsync({type:'blob'});
+ const a=document.createElement('a');a.href=URL.createObjectURL(z);a.download=`${e.nombre.replace(/[^\w]+/g,'_')}.zip`;a.click();
+ btn.textContent=txt;btn.disabled=false;
+}
+
+// ====== GEOLOCALIZACIÓN ======
+let me=null,acc=null,watchId=null;
+function showMe(pos){
+ const ll=[pos.coords.latitude,pos.coords.longitude];
+ if(!me){
+  me=L.circleMarker(ll,{radius:8,color:'#fff',weight:3,fillColor:'#2563eb',fillOpacity:1}).addTo(map);
+  acc=L.circle(ll,{radius:pos.coords.accuracy,color:'#2563eb',weight:1,fillOpacity:.1}).addTo(map);
+ }else{me.setLatLng(ll);acc.setLatLng(ll).setRadius(pos.coords.accuracy)}
+ return ll;
+}
+$('geo').onclick=()=>{
+ if(!navigator.geolocation)return toast('Geolocalización no disponible');
+ if(me)map.setView(me.getLatLng(),Math.max(map.getZoom(),17));
+ if(watchId!==null)return;
+ let first=true;
+ watchId=navigator.geolocation.watchPosition(pos=>{
+  const ll=showMe(pos);if(first){map.setView(ll,17);first=false}
+ },()=>{toast('No se pudo obtener la ubicación');watchId=null},{enableHighAccuracy:true});
+};
+
+// ====== PESTAÑAS ======
+function tab(n){
+ $('t1').classList.toggle('on',n===1);$('t2').classList.toggle('on',n===2);
+ $('map').style.display=n===1?'block':'none';$('fab').style.display=n===1?'block':'none';$('geo').style.display=$('fab').style.display;$('filtBtn').style.display=$('fab').style.display;if(n===2)$('filt').style.display='none';
+ $('downloads').style.display=n===2?'block':'none';if(n===1)map.invalidateSize();
+}
+$('t1').onclick=()=>tab(1);$('t2').onclick=()=>tab(2);
+load();
+</script></body></html>
