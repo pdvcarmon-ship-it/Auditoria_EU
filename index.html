@@ -26,6 +26,8 @@ input,select{width:100%;padding:10px;margin:4px 0;border:1px solid #ccc;border-r
 #filtBtn{position:absolute;left:12px;top:12px;z-index:1000;padding:10px 14px;border:0;border-radius:20px;background:#fff;font-size:14px;box-shadow:0 2px 8px #0005}
 #filt{position:absolute;left:12px;top:56px;z-index:1000;background:#fff;border-radius:12px;padding:12px;width:230px;box-shadow:0 2px 8px #0005;display:none}
 #filt label{font-size:12px;color:#555}
+#auth{z-index:4000;background:#fff;display:none}
+#auth h2{margin:0 0 8px;color:#16a34a}
 </style></head>
 <body>
 <div id="app">
@@ -41,7 +43,7 @@ input,select{width:100%;padding:10px;margin:4px 0;border:1px solid #ccc;border-r
    <select id="fEstado"><option value="">Todos</option><option value="pendiente">Pendiente (verde)</option><option value="en_curso">En curso (amarillo)</option><option value="finalizado">Finalizado (rojo)</option></select>
    <button class="btn g" id="fClear">Limpiar</button>
   </div>
-  <div id="downloads"><h2>Descargas por expediente</h2><div id="exps"></div></div>
+  <div id="downloads"><h2>Descargas por expediente <button class="btn g" id="logout" style="float:right">Salir</button></h2><div id="exps"></div></div>
  </main>
  <nav><button id="t1" class="on">Mapa</button><button id="t2">Descargas</button></nav>
 </div>
@@ -53,6 +55,12 @@ input,select{width:100%;padding:10px;margin:4px 0;border:1px solid #ccc;border-r
  <div id="rows"></div>
  <button class="btn g" id="addRow">+ Parcela</button>
  <div style="margin-top:12px"><button class="btn" id="save">Guardar</button><button class="btn g" id="cancel">Cancelar</button></div>
+</div></div>
+<div class="modal" id="auth"><div class="card">
+ <h2>Expedientes</h2>
+ <input id="aMail" type="email" placeholder="Correo electrónico" autocomplete="email">
+ <input id="aPass" type="password" placeholder="Contraseña (mín. 6)" autocomplete="current-password">
+ <div style="margin-top:8px"><button class="btn" id="aIn">Entrar</button><button class="btn g" id="aUp">Crear cuenta</button></div>
 </div></div>
 <input type="file" id="file" accept="image/*" capture="environment" hidden>
 <div id="msg"></div>
@@ -266,5 +274,24 @@ function tab(n){
  $('downloads').style.display=n===2?'block':'none';if(n===1)map.invalidateSize();
 }
 $('t1').onclick=()=>tab(1);$('t2').onclick=()=>tab(2);
-load();
+// ====== CUENTAS ======
+let uid=null;
+const showAuth=v=>$('auth').style.display=v?'flex':'none';
+$('aIn').onclick=async()=>{
+ const {error}=await sb.auth.signInWithPassword({email:$('aMail').value.trim(),password:$('aPass').value});
+ if(error)toast(error.message);
+};
+$('aUp').onclick=async()=>{
+ const {data,error}=await sb.auth.signUp({email:$('aMail').value.trim(),password:$('aPass').value});
+ if(error)return toast(error.message);
+ if(!data.session)toast('Revisa tu correo para confirmar la cuenta');
+};
+$('logout').onclick=()=>sb.auth.signOut();
+sb.auth.onAuthStateChange((ev,s)=>{
+ const id=s&&s.user?s.user.id:null;
+ if(id===uid)return;uid=id;
+ if(id){showAuth(false);draw.fit=0;load()}
+ else{EXPS=[];PARS=[];FOTOS=[];draw();renderExps();showAuth(true)}
+});
+sb.auth.getSession().then(({data})=>{if(!data.session)showAuth(true)});
 </script></body></html>
