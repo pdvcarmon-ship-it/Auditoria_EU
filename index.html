@@ -21,7 +21,7 @@ input,select{width:100%;padding:10px;margin:4px 0;border:1px solid #ccc;border-r
 .btn{padding:10px 14px;border:0;border-radius:8px;background:#16a34a;color:#fff;font-size:14px;margin:4px 4px 0 0}
 .btn.g{background:#e5e7eb;color:#111}.btn.b{background:#2563eb}.btn.r{background:#dc2626}
 .exp{border:1px solid #ddd;border-radius:10px;padding:12px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;gap:8px}
-#msg{position:fixed;top:10px;left:50%;transform:translateX(-50%);background:#111;color:#fff;padding:8px 14px;border-radius:8px;z-index:3000;display:none;font-size:14px}
+#msg{position:fixed;top:10px;left:50%;transform:translateX(-50%);background:#111;color:#fff;padding:8px 14px;border-radius:8px;z-index:9000;display:none;font-size:14px}
 #geo{position:absolute;right:16px;bottom:84px;z-index:1000;width:48px;height:48px;border-radius:50%;border:0;background:#fff;font-size:22px;box-shadow:0 2px 8px #0005}
 #filtBtn{position:absolute;left:12px;top:12px;z-index:1000;padding:10px 14px;border:0;border-radius:20px;background:#fff;font-size:14px;box-shadow:0 2px 8px #0005}
 #filt{position:absolute;left:12px;top:56px;z-index:1000;background:#fff;border-radius:12px;padding:12px;width:230px;box-shadow:0 2px 8px #0005;display:none}
@@ -60,6 +60,7 @@ input,select{width:100%;padding:10px;margin:4px 0;border:1px solid #ccc;border-r
  <h2>Expedientes</h2>
  <input id="aMail" type="email" placeholder="Correo electrónico" autocomplete="email">
  <input id="aPass" type="password" placeholder="Contraseña (mín. 6)" autocomplete="current-password">
+ <div id="aErr" style="color:#dc2626;font-size:14px;min-height:20px;margin-top:4px"></div>
  <div style="margin-top:8px"><button class="btn" id="aIn">Entrar</button><button class="btn g" id="aUp">Crear cuenta</button></div>
 </div></div>
 <input type="file" id="file" accept="image/*" capture="environment" hidden>
@@ -277,15 +278,21 @@ $('t1').onclick=()=>tab(1);$('t2').onclick=()=>tab(2);
 // ====== CUENTAS ======
 let uid=null;
 const showAuth=v=>$('auth').style.display=v?'flex':'none';
-$('aIn').onclick=async()=>{
- const {error}=await sb.auth.signInWithPassword({email:$('aMail').value.trim(),password:$('aPass').value});
- if(error)toast(error.message);
-};
-$('aUp').onclick=async()=>{
- const {data,error}=await sb.auth.signUp({email:$('aMail').value.trim(),password:$('aPass').value});
- if(error)return toast(error.message);
- if(!data.session)toast('Revisa tu correo para confirmar la cuenta');
-};
+const aMsg=t=>{$('aErr').textContent=t||''};
+async function authGo(kind){
+ const email=$('aMail').value.trim(),password=$('aPass').value;
+ if(!email||password.length<6)return aMsg('Escribe un correo y una contraseña de al menos 6 caracteres');
+ aMsg('Un momento…');$('aIn').disabled=$('aUp').disabled=true;
+ try{
+  const r=kind==='in'?await sb.auth.signInWithPassword({email,password}):await sb.auth.signUp({email,password});
+  if(r.error)aMsg(r.error.message);
+  else if(kind==='up'&&!r.data.session)aMsg('Cuenta creada. Revisa tu correo para confirmarla y luego pulsa Entrar.');
+  else aMsg('');
+ }catch(e){aMsg('Error: '+(e.message||e))}
+ $('aIn').disabled=$('aUp').disabled=false;
+}
+$('aIn').onclick=()=>authGo('in');
+$('aUp').onclick=()=>authGo('up');
 $('logout').onclick=()=>sb.auth.signOut();
 sb.auth.onAuthStateChange((ev,s)=>{
  const id=s&&s.user?s.user.id:null;
