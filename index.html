@@ -24,7 +24,7 @@ input,select{width:100%;padding:10px;margin:4px 0;border:1px solid #ccc;border-r
 #msg{position:fixed;top:10px;left:50%;transform:translateX(-50%);background:#111;color:#fff;padding:8px 14px;border-radius:8px;z-index:9000;display:none;font-size:14px}
 #geo{position:absolute;right:16px;bottom:84px;z-index:1000;width:48px;height:48px;border-radius:50%;border:0;background:#fff;font-size:22px;box-shadow:0 2px 8px #0005}
 #filtBtn{position:absolute;left:12px;top:12px;z-index:1000;padding:10px 14px;border:0;border-radius:20px;background:#fff;font-size:14px;box-shadow:0 2px 8px #0005}
-#filt{position:absolute;left:12px;top:56px;z-index:1000;background:#fff;border-radius:12px;padding:12px;width:230px;box-shadow:0 2px 8px #0005;display:none}
+#filt{position:absolute;left:12px;top:56px;z-index:1000;background:#fff;border-radius:12px;padding:12px;width:270px;max-height:calc(100% - 72px);overflow:auto;box-shadow:0 2px 8px #0005;display:none}
 #filt label{font-size:12px;color:#555}
 #auth{z-index:4000;background:#fff;display:none}
 #auth h2{margin:0 0 8px;color:#16a34a}
@@ -34,6 +34,8 @@ input,select{width:100%;padding:10px;margin:4px 0;border:1px solid #ccc;border-r
 .nolab .plab{display:none}
 .exp{flex-wrap:wrap}
 .row .x{margin:4px 0!important}
+#vacRes{font-size:26px;font-weight:700;text-align:center;padding:12px;border-radius:8px;margin-top:10px;background:#e5e7eb}
+.card label{font-size:13px;color:#444;display:block;margin-top:6px}
 </style></head>
 <body>
 <div id="app">
@@ -47,7 +49,11 @@ input,select{width:100%;padding:10px;margin:4px 0;border:1px solid #ccc;border-r
    <label>Tipo</label><select id="fTipo"></select>
    <label>Estado del expediente</label>
    <select id="fEstado"><option value="">Todos</option><option value="pendiente">Pendiente (verde)</option><option value="en_curso">En curso (amarillo)</option><option value="finalizado">Finalizado (rojo)</option></select>
-   <button class="btn g" id="fClear">Limpiar</button>
+   <label>Referencias SIGPAC <b id="fRefN"></b></label>
+   <input id="fRefQ" placeholder="Buscar referencia o expediente…">
+   <div id="fRefs" style="max-height:170px;overflow:auto;border:1px solid #ccc;border-radius:8px;padding:4px"></div>
+   <div><button class="btn g" id="fRefAll">Todas</button><button class="btn g" id="fRefNone">Ninguna</button></div>
+   <button class="btn g" id="fClear">Limpiar todo</button>
   </div>
   <div id="downloads"><h2>Expedientes <button class="btn g" id="logout" style="float:right">Salir</button></h2>
    <div style="margin-bottom:12px"><button class="btn b" id="imp">Importar Excel</button> <small style="color:#555">Columnas: expediente · referencia SIGPAC · tipo</small></div>
@@ -70,6 +76,17 @@ input,select{width:100%;padding:10px;margin:4px 0;border:1px solid #ccc;border-r
  <input id="aPass" type="password" placeholder="Contraseña (mín. 6)" autocomplete="current-password">
  <div id="aErr" style="color:#dc2626;font-size:14px;min-height:20px;margin-top:4px"></div>
  <div style="margin-top:8px"><button class="btn" id="aIn">Entrar</button><button class="btn g" id="aUp">Crear cuenta</button></div>
+</div></div>
+<div class="modal" id="vacModal"><div class="card">
+ <h3 id="vacTitle">Vacuno</h3>
+ <label>N° animales censo</label><input id="vCenso" inputmode="numeric" autocomplete="off">
+ <label>N° animales contados</label><input id="vContados" inputmode="numeric" autocomplete="off">
+ <label>N° animales vendidos</label><input id="vVendidos" inputmode="numeric" autocomplete="off">
+ <label>N° animales han muerto</label><input id="vMuertos" inputmode="numeric" autocomplete="off">
+ <label>N° animales han nacido</label><input id="vNacidos" inputmode="numeric" autocomplete="off">
+ <label>Diferencia</label>
+ <div id="vacRes">—</div>
+ <div style="margin-top:12px"><button class="btn" id="vacSave">Guardar</button><button class="btn g" id="vacCancel">Cancelar</button></div>
 </div></div>
 <input type="file" id="file" accept="image/*" capture="environment" hidden>
 <div id="msg"></div>
@@ -120,7 +137,7 @@ async function load(){
 const expName=id=>(EXPS.find(x=>x.id===id)||{}).nombre||'';
 const nFotos=pid=>FOTOS.filter(f=>f.parcela_id===pid).length;
 
-const F={exp:'',tipo:'',estado:''};
+const F={exp:'',tipo:'',estado:'',refs:new Set()};
 function expEstado(id){
  const ps=PARS.filter(p=>p.expediente_id===id);
  if(!ps.length)return 'pendiente';
@@ -128,8 +145,32 @@ function expEstado(id){
  if(ps.every(p=>p.estado==='pendiente'))return 'pendiente';
  return 'en_curso';
 }
-function pasa(p){
+function pasaBase(p){
  return(!F.exp||p.expediente_id===F.exp)&&(!F.tipo||p.tipo===F.tipo)&&(!F.estado||expEstado(p.expediente_id)===F.estado);
+}
+function pasa(p){return pasaBase(p)&&(!F.refs.size||F.refs.has(fmt(p.ref_sigpac)))}
+function updBtn(){$('filtBtn').textContent=(F.exp||F.tipo||F.estado||F.refs.size)?'Filtros ●':'Filtros'}
+function refresh(){draw.fit=0;draw();updBtn();$('fRefN').textContent=F.refs.size?'('+F.refs.size+')':''}
+function refList(){
+ const q=$('fRefQ').value.trim().toLowerCase();
+ return PARS.filter(pasaBase).map(p=>({ref:fmt(p.ref_sigpac),exp:expName(p.expediente_id)}))
+  .filter(x=>!q||x.ref.toLowerCase().includes(q)||x.exp.toLowerCase().includes(q))
+  .sort((a,b)=>a.ref.localeCompare(b.ref,undefined,{numeric:true}));
+}
+function renderRefs(){
+ const box=$('fRefs');box.innerHTML='';
+ const all=new Set(PARS.filter(pasaBase).map(p=>fmt(p.ref_sigpac)));
+ [...F.refs].forEach(r=>{if(!all.has(r))F.refs.delete(r)});
+ const list=refList();
+ list.forEach(x=>{
+  const l=document.createElement('label');l.style.cssText='display:flex;gap:6px;align-items:flex-start;font-size:13px;color:#111;padding:3px 2px';
+  const c=document.createElement('input');c.type='checkbox';c.style.cssText='width:auto;margin:2px 0';c.checked=F.refs.has(x.ref);
+  c.onchange=()=>{c.checked?F.refs.add(x.ref):F.refs.delete(x.ref);refresh()};
+  const t=document.createElement('span');t.textContent=x.ref+' · '+x.exp;
+  l.append(c,t);box.appendChild(l);
+ });
+ if(!list.length)box.textContent='Sin resultados';
+ $('fRefN').textContent=F.refs.size?'('+F.refs.size+')':'';
 }
 function buildFilters(){
  const opt=(v,t)=>`<option value="${esc(v)}">${esc(t)}</option>`;
@@ -138,14 +179,17 @@ function buildFilters(){
  $('fTipo').innerHTML=opt('','Todos')+tipos.map(t=>opt(t,t)).join('');
  $('tiposList').innerHTML=[...new Set([...TIPOS,...tipos])].map(t=>`<option value="${esc(t)}">`).join('');
  $('fExp').value=F.exp;$('fTipo').value=F.tipo;$('fEstado').value=F.estado;
+ renderRefs();
 }
 $('filtBtn').onclick=()=>{const f=$('filt');f.style.display=f.style.display==='block'?'none':'block'};
 ['fExp','fTipo','fEstado'].forEach(id=>$(id).onchange=()=>{
  F.exp=$('fExp').value;F.tipo=$('fTipo').value;F.estado=$('fEstado').value;
- draw.fit=0;draw();
- $('filtBtn').textContent=(F.exp||F.tipo||F.estado)?'Filtros ●':'Filtros';
+ renderRefs();refresh();
 });
-$('fClear').onclick=()=>{F.exp=F.tipo=F.estado='';buildFilters();draw.fit=0;draw();$('filtBtn').textContent='Filtros'};
+$('fRefQ').oninput=renderRefs;
+$('fRefAll').onclick=()=>{refList().forEach(x=>F.refs.add(x.ref));renderRefs();refresh()};
+$('fRefNone').onclick=()=>{F.refs.clear();renderRefs();refresh()};
+$('fClear').onclick=()=>{F.exp=F.tipo=F.estado='';F.refs.clear();$('fRefQ').value='';buildFilters();refresh()};
 
 function draw(){
  layer.clearLayers();
@@ -263,6 +307,35 @@ async function delExp(e){
  draw.fit=0;await load();toast('Expediente eliminado');
 }
 
+// ====== VACUNO ======
+const VF=[['censo','vCenso'],['contados','vContados'],['vendidos','vVendidos'],['muertos','vMuertos'],['nacidos','vNacidos']];
+let vacId=null;
+const esVacuno=id=>PARS.some(p=>p.expediente_id===id&&String(p.tipo||'').trim().toLowerCase()==='vacuno');
+// censo - (contados + vendidos + muertos - nacidos)
+const vacDiff=v=>v.censo-(v.contados+v.vendidos+v.muertos-v.nacidos);
+const vacOk=v=>v&&VF.every(([k])=>Number.isInteger(v[k]));
+const vacBadge=e=>vacOk(e.vacuno)?`<br><small style="font-weight:700;color:${vacDiff(e.vacuno)===0?'#16a34a':'#dc2626'}">Vacuno · diferencia ${vacDiff(e.vacuno)}</small>`:'';
+function vacCalc(){
+ const vals={};let full=true;
+ VF.forEach(([k,id])=>{const t=$(id).value;if(t==='')full=false;vals[k]=t===''?0:parseInt(t,10)});
+ const r=$('vacRes');
+ if(!full){r.textContent='—';r.style.background='#e5e7eb';r.style.color='#111';return null}
+ const d=vacDiff(vals);r.textContent=d;r.style.background=d===0?'#16a34a':'#dc2626';r.style.color='#fff';return vals;
+}
+VF.forEach(([k,id])=>$(id).oninput=e=>{e.target.value=e.target.value.replace(/\D/g,'').slice(0,9);vacCalc()});
+function openVac(e){
+ vacId=e.id;$('vacTitle').textContent='Vacuno · '+e.nombre;
+ const v=e.vacuno||{};VF.forEach(([k,id])=>$(id).value=v[k]!=null?String(v[k]):'');
+ vacCalc();$('vacModal').style.display='flex';
+}
+$('vacCancel').onclick=()=>$('vacModal').style.display='none';
+$('vacSave').onclick=async()=>{
+ const vals=vacCalc();if(!vals)return toast('Rellena todos los campos (0 si no hay)');
+ const {error}=await sb.from('expedientes').update({vacuno:vals}).eq('id',vacId);
+ if(error)return toast(error.message);
+ $('vacModal').style.display='none';await load();toast('Información guardada');
+};
+
 // ====== IMPORTAR EXCEL ======
 $('imp').onclick=()=>$('xl').click();
 $('xl').onchange=async ev=>{
@@ -330,10 +403,11 @@ function renderExps(){
   const n=FOTOS.filter(f=>f.expediente_id===e.id).length;
   const np=PARS.filter(p=>p.expediente_id===e.id).length;
   const d=document.createElement('div');d.className='exp';
-  d.innerHTML=`<div><b>${esc(e.nombre)}</b><br><small>${np} parcelas · ${n} fotos</small></div>`;
+  d.innerHTML=`<div><b>${esc(e.nombre)}</b><br><small>${np} parcelas · ${n} fotos</small>${vacBadge(e)}</div>`;
   const bx=document.createElement('div');
   const add=(t,cls,fn,dis)=>{const b=document.createElement('button');b.className='btn '+cls;b.textContent=t;b.disabled=!!dis;b.onclick=()=>fn(b);bx.appendChild(b)};
   add('Descargar ZIP','',b=>zipExp(e,b),!n);
+  if(esVacuno(e.id))add(e.vacuno?'Info vacuno':'Añadir información','b',()=>openVac(e));
   add('Editar','g',()=>openEdit(e));
   add('Eliminar','r',()=>delExp(e));
   d.appendChild(bx);$('exps').appendChild(d);
