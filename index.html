@@ -49,9 +49,11 @@ input,select{width:100%;padding:10px;margin:4px 0;border:1px solid #ccc;border-r
    <select id="fEstado"><option value="">Todos</option><option value="pendiente">Pendiente (verde)</option><option value="en_curso">En curso (amarillo)</option><option value="finalizado">Finalizado (rojo)</option></select>
    <button class="btn g" id="fClear">Limpiar</button>
   </div>
-  <div id="downloads"><h2>Descargas por expediente <button class="btn g" id="logout" style="float:right">Salir</button></h2><div id="exps"></div></div>
+  <div id="downloads"><h2>Expedientes <button class="btn g" id="logout" style="float:right">Salir</button></h2>
+   <div style="margin-bottom:12px"><button class="btn b" id="imp">Importar Excel</button> <small style="color:#555">Columnas: expediente · referencia SIGPAC · tipo</small></div>
+   <input type="file" id="xl" accept=".xlsx,.xls,.csv" hidden><div id="exps"></div></div>
  </main>
- <nav><button id="t1" class="on">Mapa</button><button id="t2">Descargas</button></nav>
+ <nav><button id="t1" class="on">Mapa</button><button id="t2">Expedientes</button></nav>
 </div>
 
 <div class="modal" id="addModal"><div class="card">
@@ -75,6 +77,7 @@ input,select{width:100%;padding:10px;margin:4px 0;border:1px solid #ccc;border-r
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 // ====== CONFIG ======
 const CFG={
@@ -259,6 +262,66 @@ async function delExp(e){
  if(error)return toast(error.message);
  draw.fit=0;await load();toast('Expediente eliminado');
 }
+
+// ====== IMPORTAR EXCEL ======
+$('imp').onclick=()=>$('xl').click();
+$('xl').onchange=async ev=>{
+ const f=ev.target.files[0];ev.target.value='';if(!f)return;
+ const btn=$('imp'),txt=btn.textContent;btn.disabled=true;btn.textContent='Leyendo…';
+ const fallos=[];let okPar=0,okExp=0,dup=0;
+ try{
+  const wb=XLSX.read(await f.arrayBuffer(),{type:'array'});
+  const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:'',raw:false});
+  const valid=r=>{const p=r.split('/');return p.length>=6&&p.length<=7&&p.every(x=>/^\d+$/.test(x))};
+  const items=[],seen=new Set();let last='';
+  rows.forEach((r,i)=>{
+   const c0=String(r[0]??'').trim();if(c0)last=c0;
+   const ref=fmt(r[1]),tipo=norm(String(r[2]??''));
+   if(!c0&&!ref&&!tipo)return;
+   if(!valid(ref)){if(i>0)fallos.push((ref||'(vacía)')+' · fila '+(i+1)+': referencia no válida');return}
+   if(!last){fallos.push(ref+' · fila '+(i+1)+': sin expediente');return}
+   const k=last.toLowerCase()+'|'+ref;if(seen.has(k)){dup++;return}seen.add(k);
+   items.push({exp:last,ref,tipo});
+  });
+  if(!items.length){alert('No he encontrado parcelas. Revisa que las columnas sean: expediente, referencia SIGPAC, tipo.');throw 0}
+  // geometrías por tandas de 10
+  let done=0;
+  for(let i=0;i<items.length;i+=10){
+   await Promise.all(items.slice(i,i+10).map(async it=>{
+    try{it.geom=await getGeom(it.ref)}catch(e){it.err=e.message||'no encontrada'}
+    btn.textContent='SIGPAC '+(++done)+'/'+items.length;
+   }));
+  }
+  // agrupar por expediente
+  const groups=new Map();
+  items.forEach(it=>{
+   if(it.err){fallos.push(it.ref+' ('+it.exp+'): '+it.err);return}
+   const k=it.exp.toLowerCase();if(!groups.has(k))groups.set(k,{nombre:it.exp,list:[]});groups.get(k).list.push(it);
+  });
+  btn.textContent='Guardando…';
+  for(const [k,g] of groups){
+   try{
+    let ex=EXPS.find(e=>e.nombre.trim().toLowerCase()===k),id,nuevo=false;
+    let list=g.list;
+    if(ex){
+     id=ex.id;const have=new Set(PARS.filter(p=>p.expediente_id===id).map(p=>fmt(p.ref_sigpac)));
+     list=list.filter(it=>{if(have.has(it.ref)){dup++;return false}return true});
+    }else{
+     const r=await sb.from('expedientes').insert({nombre:g.nombre}).select().single();if(r.error)throw r.error;
+     id=r.data.id;nuevo=true;
+    }
+    if(list.length){
+     const r=await sb.from('parcelas').insert(list.map(it=>({expediente_id:id,ref_sigpac:it.ref,tipo:it.tipo,geom:it.geom,estado:'pendiente'})));
+     if(r.error)throw r.error;okPar+=list.length;
+    }
+    if(nuevo)okExp++;
+   }catch(e){fallos.push(g.nombre+': '+(e.message||'error al guardar'))}
+  }
+  draw.fit=0;await load();
+  alert('Importadas '+okPar+' parcelas ('+okExp+' expedientes nuevos).'+(dup?'\nRepetidas omitidas: '+dup+'.':'')+(fallos.length?'\n\nNo se pudieron importar ('+fallos.length+'):\n- '+fallos.slice(0,15).join('\n- ')+(fallos.length>15?'\n… y '+(fallos.length-15)+' más':''):''));
+ }catch(e){if(e)toast(e.message||'Error al importar')}
+ btn.disabled=false;btn.textContent=txt;
+};
 
 // ====== DESCARGAS ======
 function renderExps(){
