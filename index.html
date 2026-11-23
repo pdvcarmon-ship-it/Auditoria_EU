@@ -82,6 +82,7 @@ const CFG={
  BACKEND_URL:'https://auditoria-back-9ga7.onrender.com', // solo fallback para SIGPAC (CORS)
  BUCKET:'fotos'
 };
+const esc=t=>String(t??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=r=>String(r||'').split(/[:\-\s,.\/]+/).filter(Boolean).join('/');
 const safe=t=>String(t||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[\\/:*?"<>|]+/g,'_').trim();
 const norm=t=>{t=t.trim();return t?t[0].toUpperCase()+t.slice(1).toLowerCase():''};
@@ -119,11 +120,11 @@ function pasa(p){
  return(!F.exp||p.expediente_id===F.exp)&&(!F.tipo||p.tipo===F.tipo)&&(!F.estado||expEstado(p.expediente_id)===F.estado);
 }
 function buildFilters(){
- const opt=(v,t)=>`<option value="${v}">${t}</option>`;
+ const opt=(v,t)=>`<option value="${esc(v)}">${esc(t)}</option>`;
  $('fExp').innerHTML=opt('','Todos')+EXPS.map(e=>opt(e.id,e.nombre)).join('');
  const tipos=[...new Set(PARS.map(p=>p.tipo).filter(Boolean))];
  $('fTipo').innerHTML=opt('','Todos')+tipos.map(t=>opt(t,t)).join('');
- $('tiposList').innerHTML=[...new Set([...TIPOS,...tipos])].map(t=>`<option value="${t}">`).join('');
+ $('tiposList').innerHTML=[...new Set([...TIPOS,...tipos])].map(t=>`<option value="${esc(t)}">`).join('');
  $('fExp').value=F.exp;$('fTipo').value=F.tipo;$('fEstado').value=F.estado;
 }
 $('filtBtn').onclick=()=>{const f=$('filt');f.style.display=f.style.display==='block'?'none':'block'};
@@ -140,7 +141,7 @@ function draw(){
   if(!p.geom||!pasa(p))return;
   const c=COLOR[p.estado]||COLOR.pendiente;
   const g=L.geoJSON(p.geom,{style:{color:c,fillColor:c,fillOpacity:.45,weight:2}});
-  g.eachLayer(l=>l.bindTooltip(expName(p.expediente_id),{permanent:true,direction:'center',className:'plab'}));
+  g.eachLayer(l=>l.bindTooltip(esc(expName(p.expediente_id)),{permanent:true,direction:'center',className:'plab'}));
   g.on('click',()=>openPopup(p)).addTo(layer);
  });
  if(layer.getLayers().length&&!draw.fit){map.fitBounds(layer.getBounds(),{maxZoom:17});draw.fit=1}
@@ -150,7 +151,7 @@ function centroid(p){const b=L.geoJSON(p.geom).getBounds().getCenter();return b}
 function openPopup(p){
  const el=document.createElement('div');
  const n=nFotos(p.id);
- el.innerHTML=`<b>SIGPAC:</b> ${fmt(p.ref_sigpac)}<br><b>Expediente:</b> ${expName(p.expediente_id)}<br><b>Tipo:</b> ${p.tipo||'-'}<br><b>Fotos:</b> ${n}<br>`;
+ el.innerHTML=`<b>SIGPAC:</b> ${fmt(p.ref_sigpac)}<br><b>Expediente:</b> ${esc(expName(p.expediente_id))}<br><b>Tipo:</b> ${esc(p.tipo||'-')}<br><b>Fotos:</b> ${n}<br>`;
  const add=(t,cls,fn)=>{const b=document.createElement('button');b.className='btn '+cls;b.textContent=t;b.onclick=fn;el.appendChild(b)};
  const c=centroid(p);
  add('Ir','b',()=>window.open(`https://www.google.com/maps/dir/?api=1&destination=${c.lat},${c.lng}&travelmode=driving`,'_blank'));
@@ -170,7 +171,7 @@ $('file').onchange=async e=>{
  const f=e.target.files[0];e.target.value='';if(!f||!currentPar)return;
  const p=currentPar;toast('Subiendo foto…');
  const blob=await resize(f);
- const path=`${p.expediente_id}/${p.id}/${Date.now()}.jpg`;
+ const path=`${uid}/${p.expediente_id}/${p.id}/${Date.now()}.jpg`;
  const up=await sb.storage.from(CFG.BUCKET).upload(path,blob,{contentType:'image/jpeg'});
  if(up.error)return toast('Error subiendo foto');
  const ins=await sb.from('fotos').insert({parcela_id:p.id,expediente_id:p.expediente_id,path});
@@ -257,7 +258,7 @@ function renderExps(){
   const n=FOTOS.filter(f=>f.expediente_id===e.id).length;
   const np=PARS.filter(p=>p.expediente_id===e.id).length;
   const d=document.createElement('div');d.className='exp';
-  d.innerHTML=`<div><b>${e.nombre}</b><br><small>${np} parcelas · ${n} fotos</small></div>`;
+  d.innerHTML=`<div><b>${esc(e.nombre)}</b><br><small>${np} parcelas · ${n} fotos</small></div>`;
   const bx=document.createElement('div');
   const add=(t,cls,fn,dis)=>{const b=document.createElement('button');b.className='btn '+cls;b.textContent=t;b.disabled=!!dis;b.onclick=()=>fn(b);bx.appendChild(b)};
   add('Descargar ZIP','',b=>zipExp(e,b),!n);
@@ -280,9 +281,10 @@ async function zipExp(e,btn){
  for(let i=0;i<fs.length;i++){
   btn.textContent=`${i+1}/${fs.length}`;
   const par=PARS.find(p=>p.id===fs[i].parcela_id);const ref=par?par.ref_sigpac:'sin-ref';
-  const url=sb.storage.from(CFG.BUCKET).getPublicUrl(fs[i].path).data.publicUrl;
   try{
-   const blob=await (await fetch(url)).blob();
+   const dl=await sb.storage.from(CFG.BUCKET).download(fs[i].path);
+   if(dl.error)throw dl.error;
+   const blob=dl.data;
    const out=await caption(blob,`${e.nombre} · SIGPAC ${fmt(ref)}`);
    zip.file(`${base}_${++k}.jpg`,out);
   }catch{}
