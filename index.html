@@ -28,6 +28,11 @@ input,select{width:100%;padding:10px;margin:4px 0;border:1px solid #ccc;border-r
 #filt label{font-size:12px;color:#555}
 #auth{z-index:4000;background:#fff;display:none}
 #auth h2{margin:0 0 8px;color:#16a34a}
+.plab{background:none!important;border:0!important;box-shadow:none!important;color:#fff;font-weight:700;font-size:12px;text-shadow:0 0 3px #000,0 0 3px #000,0 0 3px #000;white-space:nowrap;padding:0!important}
+.plab:before{display:none!important}
+.nolab .plab{display:none}
+.exp{flex-wrap:wrap}
+.row .x{margin:4px 0!important}
 </style></head>
 <body>
 <div id="app">
@@ -49,7 +54,7 @@ input,select{width:100%;padding:10px;margin:4px 0;border:1px solid #ccc;border-r
 </div>
 
 <div class="modal" id="addModal"><div class="card">
- <h3>Añadir expediente</h3>
+ <h3 id="mTitle">Añadir expediente</h3>
  <input id="expName" placeholder="Nombre del expediente">
  <datalist id="tiposList"></datalist>
  <div id="rows"></div>
@@ -77,6 +82,8 @@ const CFG={
  BACKEND_URL:'https://auditoria-back-9ga7.onrender.com', // solo fallback para SIGPAC (CORS)
  BUCKET:'fotos'
 };
+const fmt=r=>String(r||'').split(/[:\-\s,.\/]+/).filter(Boolean).join('/');
+const safe=t=>String(t||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[\\/:*?"<>|]+/g,'_').trim();
 const norm=t=>{t=t.trim();return t?t[0].toUpperCase()+t.slice(1).toLowerCase():''};
 const TIPOS=['Olivar','Cítrico','Cereal','Viñedo','Frutal','Hortícola','Otro'];
 const COLOR={pendiente:'#22c55e',en_curso:'#eab308',finalizado:'#ef4444'};
@@ -132,8 +139,9 @@ function draw(){
  PARS.forEach(p=>{
   if(!p.geom||!pasa(p))return;
   const c=COLOR[p.estado]||COLOR.pendiente;
-  L.geoJSON(p.geom,{style:{color:c,fillColor:c,fillOpacity:.45,weight:2}})
-   .on('click',()=>openPopup(p)).addTo(layer);
+  const g=L.geoJSON(p.geom,{style:{color:c,fillColor:c,fillOpacity:.45,weight:2}});
+  g.eachLayer(l=>l.bindTooltip(expName(p.expediente_id),{permanent:true,direction:'center',className:'plab'}));
+  g.on('click',()=>openPopup(p)).addTo(layer);
  });
  if(layer.getLayers().length&&!draw.fit){map.fitBounds(layer.getBounds(),{maxZoom:17});draw.fit=1}
 }
@@ -142,15 +150,17 @@ function centroid(p){const b=L.geoJSON(p.geom).getBounds().getCenter();return b}
 function openPopup(p){
  const el=document.createElement('div');
  const n=nFotos(p.id);
- el.innerHTML=`<b>SIGPAC:</b> ${p.ref_sigpac}<br><b>Expediente:</b> ${expName(p.expediente_id)}<br><b>Tipo:</b> ${p.tipo||'-'}<br><b>Fotos:</b> ${n}<br>`;
+ el.innerHTML=`<b>SIGPAC:</b> ${fmt(p.ref_sigpac)}<br><b>Expediente:</b> ${expName(p.expediente_id)}<br><b>Tipo:</b> ${p.tipo||'-'}<br><b>Fotos:</b> ${n}<br>`;
  const add=(t,cls,fn)=>{const b=document.createElement('button');b.className='btn '+cls;b.textContent=t;b.onclick=fn;el.appendChild(b)};
  const c=centroid(p);
  add('Ir','b',()=>window.open(`https://www.google.com/maps/dir/?api=1&destination=${c.lat},${c.lng}&travelmode=driving`,'_blank'));
  add('Añadir foto','',()=>{currentPar=p;$('file').click()});
  if(n>0&&p.estado!=='finalizado')add('Finalizado','r',()=>finalizar(p));
+ add('Editar expediente','g',()=>{map.closePopup();openEdit(EXPS.find(x=>x.id===p.expediente_id))});
  L.popup().setLatLng(c).setContent(el).openOn(map);
 }
 
+map.on('zoomend',()=>$('map').classList.toggle('nolab',map.getZoom()<12));
 // ====== FOTOS ======
 function resize(file,max=1600){return new Promise(async res=>{
  const bm=await createImageBitmap(file);const k=Math.min(1,max/Math.max(bm.width,bm.height));
@@ -175,13 +185,21 @@ async function finalizar(p){
 }
 
 // ====== AÑADIR EXPEDIENTE ======
-function addRow(){
- const d=document.createElement('div');d.className='row';
- d.innerHTML=`<input class="ref" placeholder="Ref. SIGPAC (41:091:0:0:12:34:1)"><input class="tipo" list="tiposList" placeholder="Tipo (ej. Olivar)">`;
+let editId=null,removed=[];
+function addRow(ref='',tipo='',pid=null){
+ const d=document.createElement('div');d.className='row';if(pid)d.dataset.pid=pid;
+ d.innerHTML='<input class="ref" placeholder="Ref. SIGPAC (41/091/0/0/12/34/1)"><input class="tipo" list="tiposList" placeholder="Tipo (ej. Olivar)">'+(pid?'<button class="btn r x">✕</button>':'');
+ d.querySelector('.ref').value=ref;d.querySelector('.tipo').value=tipo;
+ if(pid){d.querySelector('.ref').disabled=true;d.querySelector('.x').onclick=()=>{removed.push(pid);d.remove()}}
  $('rows').appendChild(d);
 }
-$('fab').onclick=()=>{$('expName').value='';$('rows').innerHTML='';addRow();$('addModal').style.display='flex'};
-$('addRow').onclick=addRow;
+$('fab').onclick=()=>{editId=null;removed=[];$('mTitle').textContent='Añadir expediente';$('expName').value='';$('rows').innerHTML='';addRow();$('addModal').style.display='flex'};
+function openEdit(e){
+ editId=e.id;removed=[];$('mTitle').textContent='Editar expediente';$('expName').value=e.nombre;$('rows').innerHTML='';
+ PARS.filter(p=>p.expediente_id===e.id).forEach(p=>addRow(fmt(p.ref_sigpac),p.tipo||'',p.id));
+ addRow();$('addModal').style.display='flex';
+}
+$('addRow').onclick=()=>addRow();
 $('cancel').onclick=()=>$('addModal').style.display='none';
 
 async function getGeom(ref){
@@ -196,29 +214,56 @@ async function getGeom(ref){
 }
 $('save').onclick=async()=>{
  const nombre=$('expName').value.trim();
- const rows=[...document.querySelectorAll('#rows .row')].map(r=>({ref:r.querySelector('.ref').value.trim(),tipo:norm(r.querySelector('.tipo').value)})).filter(r=>r.ref);
- if(!nombre||!rows.length)return toast('Pon nombre y al menos una parcela');
- $('save').disabled=true;toast('Buscando parcelas en SIGPAC…');
+ const all=[...document.querySelectorAll('#rows .row')];
+ const olds=all.filter(r=>r.dataset.pid).map(r=>({id:r.dataset.pid,tipo:norm(r.querySelector('.tipo').value)}));
+ const news=all.filter(r=>!r.dataset.pid).map(r=>({ref:fmt(r.querySelector('.ref').value),tipo:norm(r.querySelector('.tipo').value)})).filter(r=>r.ref);
+ if(!nombre||(!olds.length&&!news.length))return toast('Pon nombre y al menos una parcela');
+ $('save').disabled=true;if(news.length)toast('Buscando parcelas en SIGPAC…');
  try{
-  const geoms=await Promise.all(rows.map(r=>getGeom(r.ref)));
-  const {data:ex,error}=await sb.from('expedientes').insert({nombre}).select().single();
-  if(error)throw error;
-  const {error:e2}=await sb.from('parcelas').insert(rows.map((r,i)=>({expediente_id:ex.id,ref_sigpac:r.ref,tipo:r.tipo,geom:geoms[i],estado:'pendiente'})));
-  if(e2)throw e2;
-  $('addModal').style.display='none';draw.fit=0;await load();toast('Expediente guardado');
+  const geoms=await Promise.all(news.map(r=>getGeom(r.ref)));
+  let id=editId;
+  if(id){
+   let r=await sb.from('expedientes').update({nombre}).eq('id',id);if(r.error)throw r.error;
+   await Promise.all(olds.map(o=>sb.from('parcelas').update({tipo:o.tipo}).eq('id',o.id)));
+   if(removed.length){
+    const paths=FOTOS.filter(f=>removed.includes(f.parcela_id)).map(f=>f.path);
+    if(paths.length)await sb.storage.from(CFG.BUCKET).remove(paths);
+    r=await sb.from('parcelas').delete().in('id',removed);if(r.error)throw r.error;
+   }
+  }else{
+   const r=await sb.from('expedientes').insert({nombre}).select().single();if(r.error)throw r.error;id=r.data.id;
+  }
+  if(news.length){
+   const r=await sb.from('parcelas').insert(news.map((r,i)=>({expediente_id:id,ref_sigpac:r.ref,tipo:r.tipo,geom:geoms[i],estado:'pendiente'})));
+   if(r.error)throw r.error;
+  }
+  $('addModal').style.display='none';draw.fit=0;await load();toast(editId?'Expediente actualizado':'Expediente guardado');
  }catch(e){toast(e.message||'Error')}
  $('save').disabled=false;
 };
+async function delExp(e){
+ if(!confirm('¿Eliminar "'+e.nombre+'" con todas sus parcelas y fotos? No se puede deshacer.'))return;
+ const paths=FOTOS.filter(f=>f.expediente_id===e.id).map(f=>f.path);
+ if(paths.length)await sb.storage.from(CFG.BUCKET).remove(paths);
+ const {error}=await sb.from('expedientes').delete().eq('id',e.id);
+ if(error)return toast(error.message);
+ draw.fit=0;await load();toast('Expediente eliminado');
+}
 
 // ====== DESCARGAS ======
 function renderExps(){
  $('exps').innerHTML='';
  EXPS.forEach(e=>{
   const n=FOTOS.filter(f=>f.expediente_id===e.id).length;
+  const np=PARS.filter(p=>p.expediente_id===e.id).length;
   const d=document.createElement('div');d.className='exp';
-  d.innerHTML=`<div><b>${e.nombre}</b><br><small>${n} fotos</small></div>`;
-  const b=document.createElement('button');b.className='btn';b.textContent='Descargar ZIP';b.disabled=!n;
-  b.onclick=()=>zipExp(e,b);d.appendChild(b);$('exps').appendChild(d);
+  d.innerHTML=`<div><b>${e.nombre}</b><br><small>${np} parcelas · ${n} fotos</small></div>`;
+  const bx=document.createElement('div');
+  const add=(t,cls,fn,dis)=>{const b=document.createElement('button');b.className='btn '+cls;b.textContent=t;b.disabled=!!dis;b.onclick=()=>fn(b);bx.appendChild(b)};
+  add('Descargar ZIP','',b=>zipExp(e,b),!n);
+  add('Editar','g',()=>openEdit(e));
+  add('Eliminar','r',()=>delExp(e));
+  d.appendChild(bx);$('exps').appendChild(d);
  });
 }
 async function caption(blob,text){
@@ -231,20 +276,19 @@ async function caption(blob,text){
 }
 async function zipExp(e,btn){
  const txt=btn.textContent;btn.disabled=true;
- const zip=new JSZip();const fs=FOTOS.filter(f=>f.expediente_id===e.id);const cnt={};
+ const zip=new JSZip();const fs=FOTOS.filter(f=>f.expediente_id===e.id);const base=safe(e.nombre)||'expediente';let k=0;
  for(let i=0;i<fs.length;i++){
   btn.textContent=`${i+1}/${fs.length}`;
   const par=PARS.find(p=>p.id===fs[i].parcela_id);const ref=par?par.ref_sigpac:'sin-ref';
   const url=sb.storage.from(CFG.BUCKET).getPublicUrl(fs[i].path).data.publicUrl;
   try{
    const blob=await (await fetch(url)).blob();
-   const out=await caption(blob,`${e.nombre} · SIGPAC ${ref}`);
-   const key=ref.replace(/[^\w]+/g,'_');cnt[key]=(cnt[key]||0)+1;
-   zip.file(`${key}_${cnt[key]}.jpg`,out);
+   const out=await caption(blob,`${e.nombre} · SIGPAC ${fmt(ref)}`);
+   zip.file(`${base}_${++k}.jpg`,out);
   }catch{}
  }
  const z=await zip.generateAsync({type:'blob'});
- const a=document.createElement('a');a.href=URL.createObjectURL(z);a.download=`${e.nombre.replace(/[^\w]+/g,'_')}.zip`;a.click();
+ const a=document.createElement('a');a.href=URL.createObjectURL(z);a.download=`${base}.zip`;a.click();
  btn.textContent=txt;btn.disabled=false;
 }
 
