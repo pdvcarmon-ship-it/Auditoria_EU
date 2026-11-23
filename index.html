@@ -51,6 +51,8 @@ input,select{width:100%;padding:10px;margin:4px 0;border:1px solid #ccc;border-r
 #cGrid button small{display:block;font-size:11px;color:#a16207}
 .calh{display:flex;justify-content:space-between;align-items:center}
 .ptag{font-size:12px;border-radius:6px;padding:1px 6px;background:#fef9c3;color:#854d0e;margin-left:6px}
+#cGrid button.all{background:#dcfce7;border-color:#16a34a}
+#cGrid button.all small{color:#166534}
 </style></head>
 <body>
 <div id="app">
@@ -118,6 +120,23 @@ input,select{width:100%;padding:10px;margin:4px 0;border:1px solid #ccc;border-r
  <label>Diferencia</label>
  <div id="vacRes">—</div>
  <div style="margin-top:12px"><button class="btn" id="vacSave">Guardar</button><button class="btn g" id="vacCancel">Cancelar</button></div>
+</div></div>
+<div class="modal" id="infoModal"><div class="card">
+ <h3 id="iTitle">Información</h3>
+ <div id="iGan">
+  <div id="gFields"></div>
+  <div id="gRes" style="margin:10px 0 2px;padding:10px;border:2px solid #ccc;border-radius:10px;font-size:20px;font-weight:700;text-align:center"></div>
+  <small style="color:#555">Censo − (contados − vendidos − muertos + nacidos). Verde si es 0.</small>
+ </div>
+ <div id="iSec">
+  <label style="display:flex;gap:8px;align-items:center;font-size:15px;margin:6px 0"><input type="checkbox" id="sSi" style="width:auto;margin:0"> Árboles en secano</label>
+  <div id="sMarco" style="display:none">
+   <label style="font-size:13px;color:#555">Marco de plantación (metros × metros)</label>
+   <div style="display:flex;gap:8px;align-items:center"><input id="sX" inputmode="decimal" placeholder="m" style="flex:1"> × <input id="sY" inputmode="decimal" placeholder="m" style="flex:1"></div>
+   <div id="sRes" style="margin-top:6px;font-size:18px;font-weight:700;color:#166534"></div>
+  </div>
+ </div>
+ <div style="margin-top:12px"><button class="btn" id="iSave">Guardar</button><button class="btn g" id="iCancel">Cancelar</button></div>
 </div></div>
 <input type="file" id="file" accept="image/*" capture="environment" hidden>
 <div id="msg"></div>
@@ -268,6 +287,7 @@ function openPopup(p){
  add('Añadir foto','',()=>{currentPar=p;$('file').click()});
  if(n>0&&p.estado!=='finalizado')add('Finalizado','r',()=>finalizar(p));
  add('Editar expediente','g',()=>{map.closePopup();openEdit(EXPS.find(x=>x.id===p.expediente_id))});
+ if(kindsOf(p.tipo).length)add('Información','g',()=>{map.closePopup();openInfo(p)});
  L.popup().setLatLng(c).setContent(el).openOn(map);
 }
 
@@ -466,6 +486,70 @@ $('xl').onchange=async ev=>{
  btn.disabled=false;btn.textContent=txt;
 };
 
+// ====== INFORMACIÓN POR TIPO (ganado / secano) ======
+const kindsOf=t=>{
+ const s=String(t||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase(),k=[];
+ if(/vacuno|razas?/.test(s))k.push('ganado');
+ if(/secano/.test(s))k.push('secano');
+ return k;
+};
+const GFIELDS=[['censo','N° animales censo'],['contados','N° animales contados'],['vendidos','N° animales vendidos'],['muertos','N° animales han muerto'],['nacidos','N° animales han nacido']];
+$('gFields').innerHTML=GFIELDS.map(([f,l])=>`<label style="font-size:13px;color:#555">${l}</label><input id="g_${f}" inputmode="numeric" autocomplete="off" placeholder="0">`).join('');
+GFIELDS.forEach(([f])=>$('g_'+f).oninput=e=>{e.target.value=e.target.value.replace(/\D/g,'');calcG()});
+const num=v=>parseFloat(String(v).replace(',','.'));
+const gDiff=g=>g.censo-(g.contados-g.vendidos-g.muertos+g.nacidos);
+const arbHa=(x,y)=>Math.round(10000/(x*y));
+function calcG(){
+ const n=f=>parseInt($('g_'+f).value||'0',10)||0;
+ const r=gDiff({censo:n('censo'),contados:n('contados'),vendidos:n('vendidos'),muertos:n('muertos'),nacidos:n('nacidos')});
+ const el=$('gRes'),c=r===0?'#16a34a':'#dc2626';
+ el.textContent=r;el.style.color=c;el.style.borderColor=c;
+}
+function calcS(){
+ const on=$('sSi').checked;$('sMarco').style.display=on?'block':'none';
+ const x=num($('sX').value),y=num($('sY').value);
+ $('sRes').textContent=(on&&x>0&&y>0)?'Árboles por hectárea: '+arbHa(x,y).toLocaleString('es-ES'):'';
+}
+$('sSi').onchange=calcS;$('sX').oninput=calcS;$('sY').oninput=calcS;
+let infoPar=null;
+function openInfo(p){
+ const k=kindsOf(p.tipo),inf=p.info||{};infoPar=p;
+ $('iTitle').textContent='Información · '+fmt(p.ref_sigpac)+' ('+(p.tipo||'')+')';
+ $('iGan').style.display=k.includes('ganado')?'block':'none';
+ $('iSec').style.display=k.includes('secano')?'block':'none';
+ const g=inf.ganado||{};GFIELDS.forEach(([f])=>$('g_'+f).value=g[f]??'');
+ const sc=inf.secano||{};$('sSi').checked=!!sc.si;$('sX').value=sc.x??'';$('sY').value=sc.y??'';
+ calcG();calcS();$('infoModal').style.display='flex';
+}
+$('iCancel').onclick=()=>$('infoModal').style.display='none';
+$('iSave').onclick=async()=>{
+ const p=infoPar;if(!p)return;
+ const k=kindsOf(p.tipo),info=Object.assign({},p.info||{});
+ if(k.includes('ganado')){
+  const g={};
+  for(const [f,l] of GFIELDS){const v=$('g_'+f).value;if(!/^\d+$/.test(v))return toast('Rellena "'+l+'" con un número entero');g[f]=parseInt(v,10)}
+  info.ganado=g;
+ }
+ if(k.includes('secano')){
+  if($('sSi').checked){
+   const x=num($('sX').value),y=num($('sY').value);
+   if(!(x>0&&y>0))return toast('Pon el marco en metros (por ejemplo 7 × 7)');
+   info.secano={si:true,x,y};
+  }else info.secano={si:false,x:null,y:null};
+ }
+ $('iSave').disabled=true;
+ const r=await sb.from('parcelas').update({info}).eq('id',p.id);
+ $('iSave').disabled=false;
+ if(r.error)return toast(r.error.message);
+ $('infoModal').style.display='none';await load();toast('Información guardada');
+};
+function infoBadges(p){
+ const k=kindsOf(p.tipo),inf=p.info||{},out=[];
+ if(k.includes('ganado')&&inf.ganado){const r=gDiff(inf.ganado);out.push({t:'Diferencia '+r,c:r===0?'#16a34a':'#dc2626'})}
+ if(k.includes('secano')&&inf.secano)out.push(inf.secano.si?{t:'Secano · '+arbHa(inf.secano.x,inf.secano.y)+' árb/ha',c:'#854d0e'}:{t:'No secano',c:'#555'});
+ return out;
+}
+
 // ====== DESCARGAS ======
 function renderExps(){
  $('exps').innerHTML='';
@@ -480,7 +564,21 @@ function renderExps(){
   if(esVacuno(e.id))add(e.vacuno?'Info vacuno':'Añadir información','b',()=>openVac(e));
   add('Editar','g',()=>openEdit(e));
   add('Eliminar','r',()=>delExp(e));
-  d.appendChild(bx);$('exps').appendChild(d);
+  d.appendChild(bx);
+  const withInfo=PARS.filter(p=>p.expediente_id===e.id&&kindsOf(p.tipo).length);
+  if(withInfo.length){
+   const sub=document.createElement('div');sub.style.cssText='flex-basis:100%;border-top:1px solid #eee;padding-top:8px';
+   withInfo.forEach(p=>{
+    const r=document.createElement('div');r.style.cssText='display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px;margin-bottom:4px';
+    const l=document.createElement('span');l.textContent=fmt(p.ref_sigpac)+' · '+p.tipo;
+    infoBadges(p).forEach(b=>{const t=document.createElement('b');t.textContent='  '+b.t;t.style.color=b.c;l.appendChild(t)});
+    const btn=document.createElement('button');btn.className='btn g';btn.style.margin='0';
+    btn.textContent=infoBadges(p).length?'Editar información':'Añadir información';
+    btn.onclick=()=>openInfo(p);r.append(l,btn);sub.appendChild(r);
+   });
+   d.appendChild(sub);
+  }
+  $('exps').appendChild(d);
  });
 }
 async function caption(blob,text){
@@ -537,7 +635,7 @@ const t0=new Date();let calY=t0.getFullYear(),calM=t0.getMonth();
 const p2=n=>String(n).padStart(2,'0');
 const todayStr=()=>{const d=new Date();return d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate())};
 function renderCal(){
- const cnt={};PARS.forEach(p=>{if(p.fecha)cnt[p.fecha]=(cnt[p.fecha]||0)+1});
+ const cnt={},dn={};PARS.forEach(p=>{if(p.fecha){cnt[p.fecha]=(cnt[p.fecha]||0)+1;if(p.estado==='finalizado')dn[p.fecha]=(dn[p.fecha]||0)+1}});
  const first=new Date(calY,calM,1),nd=new Date(calY,calM+1,0).getDate(),off=(first.getDay()+6)%7;
  $('cTitle').textContent=first.toLocaleDateString('es-ES',{month:'long',year:'numeric'});
  const g=$('cGrid');g.innerHTML='';
@@ -546,13 +644,13 @@ function renderCal(){
  for(let d=1;d<=nd;d++){
   const key=calY+'-'+p2(calM+1)+'-'+p2(d);
   const b=document.createElement('button');b.textContent=d;
-  if(cnt[key]){b.className='has';const sm=document.createElement('small');sm.textContent=cnt[key];b.appendChild(sm)}
+  if(cnt[key]){const d2=dn[key]||0;b.className=d2===cnt[key]?'all':'has';const sm=document.createElement('small');sm.textContent=d2+'/'+cnt[key];b.appendChild(sm)}
   if(key===selDay)b.classList.add('sel');
   if(key===todayStr())b.classList.add('today');
   b.onclick=()=>{selDay=selDay===key?'':key;$('pDate').value=selDay;renderCal()};
   g.appendChild(b);
  }
- $('cInfo').textContent=selDay?((cnt[selDay]||0)+' parcelas el '+fmtDia(selDay)):'Toca un día para elegirlo. El número indica las parcelas previstas.';
+ $('cInfo').textContent=selDay?((dn[selDay]||0)+' de '+(cnt[selDay]||0)+' parcelas finalizadas el '+fmtDia(selDay)):'Toca un día para elegirlo. Cada día muestra parcelas finalizadas / previstas.';
 }
 function renderPend(){
  const q=$('pQ').value.trim().toLowerCase();
