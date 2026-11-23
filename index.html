@@ -126,7 +126,7 @@ input,select{width:100%;padding:10px;margin:4px 0;border:1px solid #ccc;border-r
  <div id="iGan">
   <div id="gFields"></div>
   <div id="gRes" style="margin:10px 0 2px;padding:10px;border:2px solid #ccc;border-radius:10px;font-size:20px;font-weight:700;text-align:center"></div>
-  <small style="color:#555">Censo − (contados − vendidos − muertos + nacidos). Verde si es 0.</small>
+  <small style="color:#555">Censo − (contados + vendidos + muertos - nacidos). Verde si es 0.</small>
  </div>
  <div id="iSec">
   <label style="display:flex;gap:8px;align-items:center;font-size:15px;margin:6px 0"><input type="checkbox" id="sSi" style="width:auto;margin:0"> Árboles en secano</label>
@@ -497,7 +497,7 @@ const GFIELDS=[['censo','N° animales censo'],['contados','N° animales contados
 $('gFields').innerHTML=GFIELDS.map(([f,l])=>`<label style="font-size:13px;color:#555">${l}</label><input id="g_${f}" inputmode="numeric" autocomplete="off" placeholder="0">`).join('');
 GFIELDS.forEach(([f])=>$('g_'+f).oninput=e=>{e.target.value=e.target.value.replace(/\D/g,'');calcG()});
 const num=v=>parseFloat(String(v).replace(',','.'));
-const gDiff=g=>g.censo-(g.contados-g.vendidos-g.muertos+g.nacidos);
+const gDiff=g=>g.censo-(g.contados+g.vendidos+g.muertos-g.nacidos);
 const arbHa=(x,y)=>Math.round(10000/(x*y));
 function calcG(){
  const n=f=>parseInt($('g_'+f).value||'0',10)||0;
