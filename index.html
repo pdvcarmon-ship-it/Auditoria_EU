@@ -41,6 +41,16 @@ input,select{width:100%;padding:10px;margin:4px 0;border:1px solid #ccc;border-r
 .elabwrap{overflow:visible}
 .elab{position:absolute;transform:translate(-50%,-50%);pointer-events:none}
 .noexp .elab{display:none}
+#pend{display:none;padding:16px;overflow:auto;height:100%}
+#cGrid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin:8px 0}
+#cGrid .dow{font-size:12px;color:#666;text-align:center}
+#cGrid button{border:1px solid #ddd;background:#fff;border-radius:8px;padding:6px 0;min-height:46px;font-size:13px}
+#cGrid button.has{background:#fef9c3;border-color:#eab308}
+#cGrid button.sel{outline:2px solid #2563eb}
+#cGrid button.today{font-weight:700;color:#16a34a}
+#cGrid button small{display:block;font-size:11px;color:#a16207}
+.calh{display:flex;justify-content:space-between;align-items:center}
+.ptag{font-size:12px;border-radius:6px;padding:1px 6px;background:#fef9c3;color:#854d0e;margin-left:6px}
 </style></head>
 <body>
 <div id="app">
@@ -57,13 +67,30 @@ input,select{width:100%;padding:10px;margin:4px 0;border:1px solid #ccc;border-r
    <label>Tipo</label><select id="fTipo"></select>
    <label>Estado del expediente</label>
    <select id="fEstado"><option value="">Todos</option><option value="pendiente">Pendiente (verde)</option><option value="en_curso">En curso (amarillo)</option><option value="finalizado">Finalizado (rojo)</option></select>
+   <label>Días previstos <b id="fDiaN"></b></label>
+   <div id="fDias" style="max-height:130px;overflow:auto;border:1px solid #ccc;border-radius:8px;padding:4px"></div>
+   <div><button class="btn g" id="fDiaAll">Todos</button><button class="btn g" id="fDiaNone">Ninguno</button></div>
    <button class="btn g" id="fClear">Limpiar todo</button>
+  </div>
+  <div id="pend">
+   <h2>Pendientes</h2>
+   <div class="calh"><button class="btn g" id="cPrev">&#9664;</button><b id="cTitle"></b><button class="btn g" id="cNext">&#9654;</button></div>
+   <div id="cGrid"></div>
+   <small id="cInfo" style="color:#555"></small>
+   <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:10px 0">
+    <input type="date" id="pDate" style="width:auto;margin:0">
+    <button class="btn" id="pSet">Asignar día</button>
+    <button class="btn g" id="pClear">Quitar día</button>
+    <small id="pSel" style="color:#555"></small>
+   </div>
+   <input id="pQ" placeholder="Buscar expediente o referencia…">
+   <div id="pList"></div>
   </div>
   <div id="downloads"><h2>Expedientes <button class="btn g" id="logout" style="float:right">Salir</button></h2>
    <div style="margin-bottom:12px"><button class="btn b" id="imp">Importar Excel</button> <small style="color:#555">Columnas: expediente · referencia SIGPAC · tipo</small></div>
    <input type="file" id="xl" accept=".xlsx,.xls,.csv" hidden><div id="exps"></div></div>
  </main>
- <nav><button id="t1" class="on">Mapa</button><button id="t2">Expedientes</button></nav>
+ <nav><button id="t1" class="on">Mapa</button><button id="t3">Pendientes</button><button id="t2">Expedientes</button></nav>
 </div>
 
 <div class="modal" id="addModal"><div class="card">
@@ -116,6 +143,7 @@ function geomM2(g){
 }
 const fmtHa=m2=>(m2/10000).toLocaleString('es-ES',{minimumFractionDigits:2,maximumFractionDigits:2})+' ha';
 function geomHa(g){return fmtHa(geomM2(g))}
+const fmtDia=d=>d?String(d).split('-').reverse().join('/'):'';
 const esc=t=>String(t??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=r=>String(r||'').split(/[:\-\s,.\/]+/).filter(Boolean).join('/');
 const safe=t=>String(t||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[\\/:*?"<>|]+/g,'_').trim();
@@ -137,12 +165,12 @@ async function load(){
   sb.from('parcelas').select('*'),
   sb.from('fotos').select('*').order('created_at')]);
  if(e.error||p.error||f.error)return toast('Error cargando datos');
- EXPS=e.data;PARS=p.data;FOTOS=f.data;buildFilters();draw();renderExps();
+ EXPS=e.data;PARS=p.data;FOTOS=f.data;buildFilters();draw();renderExps();renderCal();renderPend();
 }
 const expName=id=>(EXPS.find(x=>x.id===id)||{}).nombre||'';
 const nFotos=pid=>FOTOS.filter(f=>f.parcela_id===pid).length;
 
-const F={exps:new Set(),tipo:'',estado:''};
+const F={exps:new Set(),tipo:'',estado:'',dias:new Set()};
 function expEstado(id){
  const ps=PARS.filter(p=>p.expediente_id===id);
  if(!ps.length)return 'pendiente';
@@ -151,10 +179,10 @@ function expEstado(id){
  return 'en_curso';
 }
 function pasa(p){
- return(!F.exps.size||F.exps.has(p.expediente_id))&&(!F.tipo||p.tipo===F.tipo)&&(!F.estado||expEstado(p.expediente_id)===F.estado);
+ return(!F.exps.size||F.exps.has(p.expediente_id))&&(!F.tipo||p.tipo===F.tipo)&&(!F.estado||expEstado(p.expediente_id)===F.estado)&&(!F.dias.size||F.dias.has(p.fecha||'_none'));
 }
-function updBtn(){$('filtBtn').textContent=(F.exps.size||F.tipo||F.estado)?'Filtros ●':'Filtros'}
-function refresh(){draw.fit=0;draw();updBtn();$('fExpN').textContent=F.exps.size?'('+F.exps.size+')':''}
+function updBtn(){$('filtBtn').textContent=(F.exps.size||F.tipo||F.estado||F.dias.size)?'Filtros ●':'Filtros'}
+function refresh(){draw.fit=0;draw();updBtn();$('fExpN').textContent=F.exps.size?'('+F.exps.size+')':'';$('fDiaN').textContent=F.dias.size?'('+F.dias.size+')':''}
 function expList(){
  const q=$('fExpQ').value.trim().toLowerCase();
  return EXPS.filter(e=>!q||e.nombre.toLowerCase().includes(q)).sort((a,b)=>a.nombre.localeCompare(b.nombre,undefined,{numeric:true}));
@@ -179,14 +207,34 @@ function buildFilters(){
  $('fTipo').innerHTML=opt('','Todos')+tipos.map(t=>opt(t,t)).join('');
  $('tiposList').innerHTML=[...new Set([...TIPOS,...tipos])].map(t=>`<option value="${esc(t)}">`).join('');
  $('fTipo').value=F.tipo;$('fEstado').value=F.estado;
- renderExpList();
+ renderExpList();renderDias();
 }
 $('filtBtn').onclick=()=>{const f=$('filt');f.style.display=f.style.display==='block'?'none':'block'};
 ['fTipo','fEstado'].forEach(id=>$(id).onchange=()=>{F.tipo=$('fTipo').value;F.estado=$('fEstado').value;refresh()});
 $('fExpQ').oninput=renderExpList;
 $('fExpAll').onclick=()=>{expList().forEach(e=>F.exps.add(e.id));renderExpList();refresh()};
 $('fExpNone').onclick=()=>{F.exps.clear();renderExpList();refresh()};
-$('fClear').onclick=()=>{F.exps.clear();F.tipo=F.estado='';$('fExpQ').value='';buildFilters();refresh()};
+function diasList(){
+ const m=new Map();PARS.forEach(p=>{const k=p.fecha||'_none';m.set(k,(m.get(k)||0)+1)});
+ return [...m.entries()].sort((a,b)=>a[0]==='_none'?1:b[0]==='_none'?-1:a[0].localeCompare(b[0]));
+}
+function renderDias(){
+ const box=$('fDias');box.innerHTML='';
+ const list=diasList();
+ [...F.dias].forEach(k=>{if(!list.some(x=>x[0]===k))F.dias.delete(k)});
+ list.forEach(([k,n])=>{
+  const l=document.createElement('label');l.style.cssText='display:flex;gap:6px;align-items:flex-start;font-size:13px;color:#111;padding:3px 2px';
+  const c=document.createElement('input');c.type='checkbox';c.style.cssText='width:auto;margin:2px 0';c.checked=F.dias.has(k);
+  c.onchange=()=>{c.checked?F.dias.add(k):F.dias.delete(k);refresh()};
+  const t=document.createElement('span');t.textContent=(k==='_none'?'Sin día asignado':fmtDia(k))+' ('+n+')';
+  l.append(c,t);box.appendChild(l);
+ });
+ if(!list.length)box.textContent='Sin parcelas';
+ $('fDiaN').textContent=F.dias.size?'('+F.dias.size+')':'';
+}
+$('fDiaAll').onclick=()=>{diasList().forEach(x=>F.dias.add(x[0]));renderDias();refresh()};
+$('fDiaNone').onclick=()=>{F.dias.clear();renderDias();refresh()};
+$('fClear').onclick=()=>{F.exps.clear();F.dias.clear();F.tipo=F.estado='';$('fExpQ').value='';buildFilters();refresh()};
 
 const elabs=L.layerGroup().addTo(map);
 function draw(){
@@ -213,7 +261,7 @@ function centroid(p){const b=L.geoJSON(p.geom).getBounds().getCenter();return b}
 function openPopup(p){
  const el=document.createElement('div');
  const n=nFotos(p.id);
- el.innerHTML=`<b>SIGPAC:</b> ${fmt(p.ref_sigpac)}<br><b>Expediente:</b> ${esc(expName(p.expediente_id))}<br><b>Tipo:</b> ${esc(p.tipo||'-')}<br><b>Superficie:</b> ${geomHa(p.geom)}<br><b>Fotos:</b> ${n}<br>`;
+ el.innerHTML=`<b>SIGPAC:</b> ${fmt(p.ref_sigpac)}<br><b>Expediente:</b> ${esc(expName(p.expediente_id))}<br><b>Tipo:</b> ${esc(p.tipo||'-')}<br><b>Superficie:</b> ${geomHa(p.geom)}<br>${p.fecha?'<b>Día previsto:</b> '+fmtDia(p.fecha)+'<br>':''}<b>Fotos:</b> ${n}<br>`;
  const add=(t,cls,fn)=>{const b=document.createElement('button');b.className='btn '+cls;b.textContent=t;b.onclick=fn;el.appendChild(b)};
  const c=centroid(p);
  add('Ir','b',()=>window.open(`https://www.google.com/maps/dir/?api=1&destination=${c.lat},${c.lng}&travelmode=driving`,'_blank'));
@@ -483,12 +531,84 @@ $('geo').onclick=()=>{
 };
 
 // ====== PESTAÑAS ======
-function tab(n){
- $('t1').classList.toggle('on',n===1);$('t2').classList.toggle('on',n===2);
- $('map').style.display=n===1?'block':'none';$('fab').style.display=n===1?'block':'none';$('geo').style.display=$('fab').style.display;$('filtBtn').style.display=$('fab').style.display;if(n===2)$('filt').style.display='none';
- $('downloads').style.display=n===2?'block':'none';if(n===1)map.invalidateSize();
+// ====== PENDIENTES / CALENDARIO ======
+const PSEL=new Set();let selDay='';
+const t0=new Date();let calY=t0.getFullYear(),calM=t0.getMonth();
+const p2=n=>String(n).padStart(2,'0');
+const todayStr=()=>{const d=new Date();return d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate())};
+function renderCal(){
+ const cnt={};PARS.forEach(p=>{if(p.fecha)cnt[p.fecha]=(cnt[p.fecha]||0)+1});
+ const first=new Date(calY,calM,1),nd=new Date(calY,calM+1,0).getDate(),off=(first.getDay()+6)%7;
+ $('cTitle').textContent=first.toLocaleDateString('es-ES',{month:'long',year:'numeric'});
+ const g=$('cGrid');g.innerHTML='';
+ ['L','M','X','J','V','S','D'].forEach(x=>{const d=document.createElement('div');d.className='dow';d.textContent=x;g.appendChild(d)});
+ for(let i=0;i<off;i++)g.appendChild(document.createElement('div'));
+ for(let d=1;d<=nd;d++){
+  const key=calY+'-'+p2(calM+1)+'-'+p2(d);
+  const b=document.createElement('button');b.textContent=d;
+  if(cnt[key]){b.className='has';const sm=document.createElement('small');sm.textContent=cnt[key];b.appendChild(sm)}
+  if(key===selDay)b.classList.add('sel');
+  if(key===todayStr())b.classList.add('today');
+  b.onclick=()=>{selDay=selDay===key?'':key;$('pDate').value=selDay;renderCal()};
+  g.appendChild(b);
+ }
+ $('cInfo').textContent=selDay?((cnt[selDay]||0)+' parcelas el '+fmtDia(selDay)):'Toca un día para elegirlo. El número indica las parcelas previstas.';
 }
-$('t1').onclick=()=>tab(1);$('t2').onclick=()=>tab(2);
+function renderPend(){
+ const q=$('pQ').value.trim().toLowerCase();
+ const box=$('pList');box.innerHTML='';
+ const pend=PARS.filter(p=>p.estado==='pendiente');
+ [...PSEL].forEach(id=>{if(!pend.some(p=>p.id===id))PSEL.delete(id)});
+ EXPS.slice().sort((a,b)=>a.nombre.localeCompare(b.nombre,undefined,{numeric:true})).forEach(e=>{
+  let ps=pend.filter(p=>p.expediente_id===e.id);
+  if(q)ps=ps.filter(p=>e.nombre.toLowerCase().includes(q)||fmt(p.ref_sigpac).includes(q));
+  if(!ps.length)return;
+  const card=document.createElement('div');card.className='exp';card.style.display='block';
+  const h=document.createElement('label');h.style.cssText='display:flex;gap:8px;align-items:center;font-weight:700;margin-bottom:4px';
+  const hc=document.createElement('input');hc.type='checkbox';hc.style.cssText='width:auto;margin:0';hc.checked=ps.every(p=>PSEL.has(p.id));
+  hc.onchange=()=>{ps.forEach(p=>hc.checked?PSEL.add(p.id):PSEL.delete(p.id));renderPend()};
+  const ht=document.createElement('span');ht.textContent=e.nombre+' ('+ps.length+')';h.append(hc,ht);card.appendChild(h);
+  ps.sort((a,b)=>(a.fecha||'9999').localeCompare(b.fecha||'9999')||fmt(a.ref_sigpac).localeCompare(fmt(b.ref_sigpac),undefined,{numeric:true})).forEach(p=>{
+   const l=document.createElement('label');l.style.cssText='display:flex;gap:8px;align-items:center;font-size:13px;padding:3px 0 3px 4px';
+   const c=document.createElement('input');c.type='checkbox';c.style.cssText='width:auto;margin:0';c.checked=PSEL.has(p.id);
+   c.onchange=()=>{c.checked?PSEL.add(p.id):PSEL.delete(p.id);$('pSel').textContent=PSEL.size?PSEL.size+' seleccionadas':''};
+   const t=document.createElement('span');t.textContent=fmt(p.ref_sigpac)+' · '+(p.tipo||'-')+' · '+geomHa(p.geom);
+   l.append(c,t);
+   if(p.fecha){const tg=document.createElement('span');tg.className='ptag';tg.textContent=fmtDia(p.fecha);l.appendChild(tg)}
+   card.appendChild(l);
+  });
+  box.appendChild(card);
+ });
+ if(!box.children.length)box.textContent='No hay parcelas pendientes';
+ $('pSel').textContent=PSEL.size?PSEL.size+' seleccionadas':'';
+}
+async function setFecha(f){
+ if(!PSEL.size)return toast('Selecciona parcelas');
+ const r=await sb.from('parcelas').update({fecha:f}).in('id',[...PSEL]);
+ if(r.error)return toast(r.error.message);
+ PSEL.clear();
+ if(f){selDay=f;const [y,m]=f.split('-');calY=+y;calM=+m-1}
+ await load();toast(f?'Día asignado':'Día quitado');
+}
+$('pSet').onclick=()=>{const d=$('pDate').value;if(!d)return toast('Elige un día');setFecha(d)};
+$('pClear').onclick=()=>setFecha(null);
+$('pDate').onchange=e=>{selDay=e.target.value;if(selDay){const [y,m]=selDay.split('-');calY=+y;calM=+m-1}renderCal()};
+$('pQ').oninput=renderPend;
+$('cPrev').onclick=()=>{calM--;if(calM<0){calM=11;calY--}renderCal()};
+$('cNext').onclick=()=>{calM++;if(calM>11){calM=0;calY++}renderCal()};
+
+function tab(n){
+ [1,2,3].forEach(i=>$('t'+i).classList.toggle('on',i===n));
+ const m=n===1;
+ $('map').style.display=m?'block':'none';
+ ['fab','geo','filtBtn'].forEach(id=>$(id).style.display=m?'block':'none');
+ if(!m)$('filt').style.display='none';
+ $('downloads').style.display=n===2?'block':'none';
+ $('pend').style.display=n===3?'block':'none';
+ if(m)map.invalidateSize();
+ if(n===3){renderCal();renderPend()}
+}
+$('t1').onclick=()=>tab(1);$('t2').onclick=()=>tab(2);$('t3').onclick=()=>tab(3);
 // ====== CUENTAS ======
 let uid=null;
 const showAuth=v=>$('auth').style.display=v?'flex':'none';
