@@ -34,7 +34,6 @@ input,select{width:100%;padding:10px;margin:4px 0;border:1px solid #ccc;border-r
 .nolab .plab{display:none}
 .exp{flex-wrap:wrap}
 .row .x{margin:4px 0!important}
-#vacRes{font-size:26px;font-weight:700;text-align:center;padding:12px;border-radius:8px;margin-top:10px;background:#e5e7eb}
 .card label{font-size:13px;color:#444;display:block;margin-top:6px}
 .plab,.elab{background:rgba(0,0,0,.7)!important;color:#fff!important;padding:2px 7px!important;border-radius:7px!important;text-shadow:none!important;font:700 12px/1.25 system-ui,sans-serif!important;text-align:center;white-space:nowrap}
 .plab span,.elab span{font-weight:400!important;font-size:11px}
@@ -116,21 +115,15 @@ input,select{width:100%;padding:10px;margin:4px 0;border:1px solid #ccc;border-r
  <div id="aErr" style="color:#dc2626;font-size:14px;min-height:20px;margin-top:4px"></div>
  <div style="margin-top:8px"><button class="btn" id="aIn">Entrar</button><button class="btn g" id="aUp">Crear cuenta</button></div>
 </div></div>
-<div class="modal" id="vacModal"><div class="card">
- <h3 id="vacTitle">Vacuno</h3>
- <label>N° animales censo</label><input id="vCenso" inputmode="numeric" autocomplete="off">
- <label>N° animales contados</label><input id="vContados" inputmode="numeric" autocomplete="off">
- <label>N° animales vendidos</label><input id="vVendidos" inputmode="numeric" autocomplete="off">
- <label>N° animales han muerto</label><input id="vMuertos" inputmode="numeric" autocomplete="off">
- <label>N° animales han nacido</label><input id="vNacidos" inputmode="numeric" autocomplete="off">
- <label>Diferencia</label>
- <div id="vacRes">—</div>
- <div style="margin-top:12px"><button class="btn" id="vacSave">Guardar</button><button class="btn g" id="vacCancel">Cancelar</button></div>
-</div></div>
 <div class="modal" id="infoModal"><div class="card">
  <h3 id="iTitle">Información</h3>
  <div id="iGan">
   <div id="gFields"></div>
+  <div id="iRaza" style="display:none;margin-top:8px">
+   <label style="display:flex;gap:8px;align-items:center;font-size:15px"><input type="checkbox" id="rzOk" style="width:auto;margin:0"> Raza comprobada</label>
+   <label style="font-size:13px;color:#555">Raza</label><input id="rzNom" autocomplete="off" placeholder="Ej. Retinta">
+   <small style="color:#555">Con tick: raza comprobada, escribe cuál es. Sin tick y con una raza escrita: la raza no es la correcta.</small>
+  </div>
   <div id="gRes" style="margin:10px 0 2px;padding:10px;border:2px solid #ccc;border-radius:10px;font-size:20px;font-weight:700;text-align:center"></div>
   <small style="color:#555">Censo − (contados + vendidos + muertos − nacidos). Verde si es 0.</small>
  </div>
@@ -139,6 +132,13 @@ input,select{width:100%;padding:10px;margin:4px 0;border:1px solid #ccc;border-r
   <div style="display:flex;gap:8px;align-items:center"><input id="sX" inputmode="decimal" placeholder="m" style="flex:1"> × <input id="sY" inputmode="decimal" placeholder="m" style="flex:1"></div>
   <div id="sRes" style="margin-top:6px;font-size:18px;font-weight:700;color:#166534"></div>
   <label style="display:flex;gap:8px;align-items:center;font-size:15px;margin:10px 0 0"><input type="checkbox" id="sSi" style="width:auto;margin:0"> Árboles en riego</label>
+ </div>
+ <div id="iDif" style="display:none">
+  <label style="font-size:13px;color:#555">Los árboles están en…</label>
+  <div style="display:flex;gap:18px;margin:6px 0">
+   <label style="display:flex;gap:6px;align-items:center;font-size:15px"><input type="radio" name="dif" value="secano" style="width:auto;margin:0"> Secano</label>
+   <label style="display:flex;gap:6px;align-items:center;font-size:15px"><input type="radio" name="dif" value="riego" style="width:auto;margin:0"> Riego</label>
+  </div>
  </div>
  <div style="margin-top:12px"><button class="btn" id="iSave">Guardar</button><button class="btn g" id="iCancel">Cancelar</button></div>
 </div></div>
@@ -401,35 +401,6 @@ async function delExp(e){
  draw.fit=0;await load();toast('Expediente eliminado');
 }
 
-// ====== VACUNO ======
-const VF=[['censo','vCenso'],['contados','vContados'],['vendidos','vVendidos'],['muertos','vMuertos'],['nacidos','vNacidos']];
-let vacId=null;
-const esVacuno=id=>PARS.some(p=>p.expediente_id===id&&String(p.tipo||'').trim().toLowerCase()==='vacuno');
-// censo - (contados + vendidos + muertos - nacidos)
-const vacDiff=v=>v.censo-(v.contados+v.vendidos+v.muertos-v.nacidos);
-const vacOk=v=>v&&VF.every(([k])=>Number.isInteger(v[k]));
-const vacBadge=e=>vacOk(e.vacuno)?`<br><small style="font-weight:700;color:${vacDiff(e.vacuno)===0?'#16a34a':'#dc2626'}">Vacuno · diferencia ${vacDiff(e.vacuno)}</small>`:'';
-function vacCalc(){
- const vals={};let full=true;
- VF.forEach(([k,id])=>{const t=$(id).value;if(t==='')full=false;vals[k]=t===''?0:parseInt(t,10)});
- const r=$('vacRes');
- if(!full){r.textContent='—';r.style.background='#e5e7eb';r.style.color='#111';return null}
- const d=vacDiff(vals);r.textContent=d;r.style.background=d===0?'#16a34a':'#dc2626';r.style.color='#fff';return vals;
-}
-VF.forEach(([k,id])=>$(id).oninput=e=>{e.target.value=e.target.value.replace(/\D/g,'').slice(0,9);vacCalc()});
-function openVac(e){
- vacId=e.id;$('vacTitle').textContent='Vacuno · '+e.nombre;
- const v=e.vacuno||{};VF.forEach(([k,id])=>$(id).value=v[k]!=null?String(v[k]):'');
- vacCalc();$('vacModal').style.display='flex';
-}
-$('vacCancel').onclick=()=>$('vacModal').style.display='none';
-$('vacSave').onclick=async()=>{
- const vals=vacCalc();if(!vals)return toast('Rellena todos los campos (0 si no hay)');
- const {error}=await sb.from('expedientes').update({vacuno:vals}).eq('id',vacId);
- if(error)return toast(error.message);
- $('vacModal').style.display='none';await load();toast('Información guardada');
-};
-
 // ====== IMPORTAR EXCEL ======
 $('imp').onclick=()=>$('xl').click();
 $('xl').onchange=async ev=>{
@@ -494,7 +465,9 @@ $('xl').onchange=async ev=>{
 const kindsOf=t=>{
  const s=String(t||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase(),k=[];
  if(/vacuno|razas?/.test(s))k.push('ganado');
+ if(/razas?/.test(s))k.push('raza');
  if(/secano|secos/.test(s))k.push('riego');
+ if(/dificultad/.test(s))k.push('dificultad');
  return k;
 };
 const kindsExp=e=>{const k=new Set();PARS.filter(p=>p.expediente_id===e.id).forEach(p=>kindsOf(p.tipo).forEach(x=>k.add(x)));return [...k]};
@@ -520,7 +493,11 @@ function openInfo(e){
  const k=kindsExp(e),inf=e.info||{};infoExp=e;
  $('iTitle').textContent='Información · '+e.nombre;
  $('iGan').style.display=k.includes('ganado')?'block':'none';
+ $('iRaza').style.display=k.includes('raza')?'block':'none';
+ const rz=inf.raza||{};$('rzOk').checked=!!rz.ok;$('rzNom').value=rz.nombre||'';
  $('iSec').style.display=k.includes('riego')?'block':'none';
+ $('iDif').style.display=k.includes('dificultad')?'block':'none';
+ const df=inf.dificultad||{};document.querySelectorAll('input[name=dif]').forEach(r=>r.checked=r.value===df.tipo);
  const g=inf.ganado||{};GFIELDS.forEach(([f])=>$('g_'+f).value=g[f]??'');
  const r=inf.riego||{};$('sSi').checked=!!r.si;$('sX').value=r.x??'';$('sY').value=r.y??'';
  calcG();calcS();$('infoModal').style.display='flex';
@@ -533,12 +510,14 @@ $('iSave').onclick=async()=>{
   const g={};
   for(const [f,l] of GFIELDS){const v=$('g_'+f).value;if(!/^\d+$/.test(v))return toast('Rellena "'+l+'" con un número entero');g[f]=parseInt(v,10)}
   info.ganado=g;
+  if(k.includes('raza')){const nom=$('rzNom').value.trim();if($('rzOk').checked&&!nom)return toast('Escribe la raza');info.raza={ok:$('rzOk').checked,nombre:nom}}
  }
  if(k.includes('riego')){
   const xs=$('sX').value.trim(),ys=$('sY').value.trim(),x=num(xs),y=num(ys);
   if((xs||ys)&&!(x>0&&y>0))return toast('Pon el marco en metros (por ejemplo 7 × 7)');
   info.riego={si:$('sSi').checked,x:xs?x:null,y:ys?y:null};
  }
+ if(k.includes('dificultad')){const rd=document.querySelector('input[name=dif]:checked');if(!rd)return toast('Indica si es secano o riego');info.dificultad={tipo:rd.value}}
  $('iSave').disabled=true;
  const r=await sb.from('expedientes').update({info}).eq('id',e.id);
  $('iSave').disabled=false;
@@ -549,6 +528,8 @@ function infoBadges(e){
  const k=kindsExp(e),inf=e.info||{},out=[];
  if(k.includes('ganado')&&inf.ganado){const r=gDiff(inf.ganado);out.push({t:'Diferencia '+r,c:r===0?'#16a34a':'#dc2626'})}
  if(k.includes('riego')&&inf.riego&&inf.riego.x>0&&inf.riego.y>0)out.push({t:arbHa(inf.riego.x,inf.riego.y)+' árb/ha'+(inf.riego.si?' · Riego':''),c:'#854d0e'});
+ if(k.includes('dificultad')&&inf.dificultad&&inf.dificultad.tipo)out.push({t:inf.dificultad.tipo==='riego'?'Riego':'Secano',c:'#854d0e'});
+ if(k.includes('raza')&&inf.raza&&inf.raza.nombre)out.push(inf.raza.ok?{t:'✓ Raza: '+inf.raza.nombre,c:'#16a34a'}:{t:'✗ Raza no correcta: '+inf.raza.nombre,c:'#dc2626'});
  return out;
 }
 
@@ -570,11 +551,10 @@ function renderExps(){
   const np=PARS.filter(p=>p.expediente_id===e.id).length;
   const d=document.createElement('div');d.className='exp';
   const tp=[...new Set(PARS.filter(p=>p.expediente_id===e.id).map(p=>p.tipo).filter(Boolean))].join(', ');
-  d.innerHTML=`<div><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${COLOR[expEstado(e.id)]};margin-right:6px"></span><b>${esc(e.nombre)}</b><br><small>${np} parcelas · ${n} fotos${tp?' · '+esc(tp):''}</small>${vacBadge(e)}</div>`;
+  d.innerHTML=`<div><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${COLOR[expEstado(e.id)]};margin-right:6px"></span><b>${esc(e.nombre)}</b><br><small>${np} parcelas · ${n} fotos${tp?' · '+esc(tp):''}</small></div>`;
   const bx=document.createElement('div');
   const add=(t,cls,fn,dis)=>{const b=document.createElement('button');b.className='btn '+cls;b.textContent=t;b.disabled=!!dis;b.onclick=()=>fn(b);bx.appendChild(b)};
   add('Descargar ZIP','',b=>zipExp(e,b),!n);
-  if(esVacuno(e.id))add(e.vacuno?'Info vacuno':'Añadir información','b',()=>openVac(e));
   add('Editar','g',()=>openEdit(e));
   add('Eliminar','r',()=>delExp(e));
   d.appendChild(bx);
