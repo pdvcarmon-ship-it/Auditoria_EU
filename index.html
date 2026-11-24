@@ -90,7 +90,13 @@ input,select{width:100%;padding:10px;margin:4px 0;border:1px solid #ccc;border-r
   </div>
   <div id="downloads"><h2>Expedientes <button class="btn g" id="logout" style="float:right">Salir</button></h2>
    <div style="margin-bottom:12px"><button class="btn b" id="imp">Importar Excel</button> <small style="color:#555">Columnas: expediente · referencia SIGPAC · tipo</small></div>
-   <input type="file" id="xl" accept=".xlsx,.xls,.csv" hidden><div id="exps"></div></div>
+   <input type="file" id="xl" accept=".xlsx,.xls,.csv" hidden>
+   <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">
+    <input id="eQ" placeholder="Buscar expediente…" style="flex:2 1 160px;margin:0">
+    <select id="eEstado" style="flex:1 1 130px;margin:0"><option value="">Todos los estados</option><option value="pendiente">Pendiente</option><option value="en_curso">En curso</option><option value="finalizado">Finalizado</option></select>
+    <select id="eTipo" style="flex:1 1 130px;margin:0"></select>
+   </div>
+   <small id="eCount" style="color:#555;display:block;margin-bottom:10px"></small><div id="exps"></div></div>
  </main>
  <nav><button id="t1" class="on">Mapa</button><button id="t3">Pendientes</button><button id="t2">Expedientes</button></nav>
 </div>
@@ -126,15 +132,13 @@ input,select{width:100%;padding:10px;margin:4px 0;border:1px solid #ccc;border-r
  <div id="iGan">
   <div id="gFields"></div>
   <div id="gRes" style="margin:10px 0 2px;padding:10px;border:2px solid #ccc;border-radius:10px;font-size:20px;font-weight:700;text-align:center"></div>
-  <small style="color:#555">Censo − (contados + vendidos + muertos - nacidos). Verde si es 0.</small>
+  <small style="color:#555">Censo − (contados + vendidos + muertos − nacidos). Verde si es 0.</small>
  </div>
  <div id="iSec">
-  <label style="display:flex;gap:8px;align-items:center;font-size:15px;margin:6px 0"><input type="checkbox" id="sSi" style="width:auto;margin:0"> Árboles en secano</label>
-  <div id="sMarco" style="display:none">
-   <label style="font-size:13px;color:#555">Marco de plantación (metros × metros)</label>
-   <div style="display:flex;gap:8px;align-items:center"><input id="sX" inputmode="decimal" placeholder="m" style="flex:1"> × <input id="sY" inputmode="decimal" placeholder="m" style="flex:1"></div>
-   <div id="sRes" style="margin-top:6px;font-size:18px;font-weight:700;color:#166534"></div>
-  </div>
+  <label style="font-size:13px;color:#555">Marco de plantación (metros × metros)</label>
+  <div style="display:flex;gap:8px;align-items:center"><input id="sX" inputmode="decimal" placeholder="m" style="flex:1"> × <input id="sY" inputmode="decimal" placeholder="m" style="flex:1"></div>
+  <div id="sRes" style="margin-top:6px;font-size:18px;font-weight:700;color:#166534"></div>
+  <label style="display:flex;gap:8px;align-items:center;font-size:15px;margin:10px 0 0"><input type="checkbox" id="sSi" style="width:auto;margin:0"> Árboles en riego</label>
  </div>
  <div style="margin-top:12px"><button class="btn" id="iSave">Guardar</button><button class="btn g" id="iCancel">Cancelar</button></div>
 </div></div>
@@ -287,7 +291,7 @@ function openPopup(p){
  add('Añadir foto','',()=>{currentPar=p;$('file').click()});
  if(n>0&&p.estado!=='finalizado')add('Finalizado','r',()=>finalizar(p));
  add('Editar expediente','g',()=>{map.closePopup();openEdit(EXPS.find(x=>x.id===p.expediente_id))});
- if(kindsOf(p.tipo).length)add('Información','g',()=>{map.closePopup();openInfo(p)});
+ const ex=EXPS.find(x=>x.id===p.expediente_id);if(ex&&kindsExp(ex).length)add('Información','g',()=>{map.closePopup();openInfo(ex)});
  L.popup().setLatLng(c).setContent(el).openOn(map);
 }
 
@@ -486,13 +490,14 @@ $('xl').onchange=async ev=>{
  btn.disabled=false;btn.textContent=txt;
 };
 
-// ====== INFORMACIÓN POR TIPO (ganado / secano) ======
+// ====== INFORMACIÓN POR EXPEDIENTE (ganado / riego) ======
 const kindsOf=t=>{
  const s=String(t||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase(),k=[];
  if(/vacuno|razas?/.test(s))k.push('ganado');
- if(/secano/.test(s))k.push('secano');
+ if(/secano|secos/.test(s))k.push('riego');
  return k;
 };
+const kindsExp=e=>{const k=new Set();PARS.filter(p=>p.expediente_id===e.id).forEach(p=>kindsOf(p.tipo).forEach(x=>k.add(x)));return [...k]};
 const GFIELDS=[['censo','N° animales censo'],['contados','N° animales contados'],['vendidos','N° animales vendidos'],['muertos','N° animales han muerto'],['nacidos','N° animales han nacido']];
 $('gFields').innerHTML=GFIELDS.map(([f,l])=>`<label style="font-size:13px;color:#555">${l}</label><input id="g_${f}" inputmode="numeric" autocomplete="off" placeholder="0">`).join('');
 GFIELDS.forEach(([f])=>$('g_'+f).oninput=e=>{e.target.value=e.target.value.replace(/\D/g,'');calcG()});
@@ -506,58 +511,66 @@ function calcG(){
  el.textContent=r;el.style.color=c;el.style.borderColor=c;
 }
 function calcS(){
- const on=$('sSi').checked;$('sMarco').style.display=on?'block':'none';
  const x=num($('sX').value),y=num($('sY').value);
- $('sRes').textContent=(on&&x>0&&y>0)?'Árboles por hectárea: '+arbHa(x,y).toLocaleString('es-ES'):'';
+ $('sRes').textContent=(x>0&&y>0)?'Árboles por hectárea: '+arbHa(x,y).toLocaleString('es-ES'):'';
 }
 $('sSi').onchange=calcS;$('sX').oninput=calcS;$('sY').oninput=calcS;
-let infoPar=null;
-function openInfo(p){
- const k=kindsOf(p.tipo),inf=p.info||{};infoPar=p;
- $('iTitle').textContent='Información · '+fmt(p.ref_sigpac)+' ('+(p.tipo||'')+')';
+let infoExp=null;
+function openInfo(e){
+ const k=kindsExp(e),inf=e.info||{};infoExp=e;
+ $('iTitle').textContent='Información · '+e.nombre;
  $('iGan').style.display=k.includes('ganado')?'block':'none';
- $('iSec').style.display=k.includes('secano')?'block':'none';
+ $('iSec').style.display=k.includes('riego')?'block':'none';
  const g=inf.ganado||{};GFIELDS.forEach(([f])=>$('g_'+f).value=g[f]??'');
- const sc=inf.secano||{};$('sSi').checked=!!sc.si;$('sX').value=sc.x??'';$('sY').value=sc.y??'';
+ const r=inf.riego||{};$('sSi').checked=!!r.si;$('sX').value=r.x??'';$('sY').value=r.y??'';
  calcG();calcS();$('infoModal').style.display='flex';
 }
 $('iCancel').onclick=()=>$('infoModal').style.display='none';
 $('iSave').onclick=async()=>{
- const p=infoPar;if(!p)return;
- const k=kindsOf(p.tipo),info=Object.assign({},p.info||{});
+ const e=infoExp;if(!e)return;
+ const k=kindsExp(e),info=Object.assign({},e.info||{});
  if(k.includes('ganado')){
   const g={};
   for(const [f,l] of GFIELDS){const v=$('g_'+f).value;if(!/^\d+$/.test(v))return toast('Rellena "'+l+'" con un número entero');g[f]=parseInt(v,10)}
   info.ganado=g;
  }
- if(k.includes('secano')){
-  if($('sSi').checked){
-   const x=num($('sX').value),y=num($('sY').value);
-   if(!(x>0&&y>0))return toast('Pon el marco en metros (por ejemplo 7 × 7)');
-   info.secano={si:true,x,y};
-  }else info.secano={si:false,x:null,y:null};
+ if(k.includes('riego')){
+  const xs=$('sX').value.trim(),ys=$('sY').value.trim(),x=num(xs),y=num(ys);
+  if((xs||ys)&&!(x>0&&y>0))return toast('Pon el marco en metros (por ejemplo 7 × 7)');
+  info.riego={si:$('sSi').checked,x:xs?x:null,y:ys?y:null};
  }
  $('iSave').disabled=true;
- const r=await sb.from('parcelas').update({info}).eq('id',p.id);
+ const r=await sb.from('expedientes').update({info}).eq('id',e.id);
  $('iSave').disabled=false;
  if(r.error)return toast(r.error.message);
  $('infoModal').style.display='none';await load();toast('Información guardada');
 };
-function infoBadges(p){
- const k=kindsOf(p.tipo),inf=p.info||{},out=[];
+function infoBadges(e){
+ const k=kindsExp(e),inf=e.info||{},out=[];
  if(k.includes('ganado')&&inf.ganado){const r=gDiff(inf.ganado);out.push({t:'Diferencia '+r,c:r===0?'#16a34a':'#dc2626'})}
- if(k.includes('secano')&&inf.secano)out.push(inf.secano.si?{t:'Secano · '+arbHa(inf.secano.x,inf.secano.y)+' árb/ha',c:'#854d0e'}:{t:'No secano',c:'#555'});
+ if(k.includes('riego')&&inf.riego&&inf.riego.x>0&&inf.riego.y>0)out.push({t:arbHa(inf.riego.x,inf.riego.y)+' árb/ha'+(inf.riego.si?' · Riego':''),c:'#854d0e'});
  return out;
 }
 
 // ====== DESCARGAS ======
+$('eQ').oninput=()=>renderExps();
+$('eEstado').onchange=()=>renderExps();
+$('eTipo').onchange=()=>renderExps();
 function renderExps(){
+ const tipos=[...new Set(PARS.map(p=>p.tipo).filter(Boolean))].sort();
+ const sel=$('eTipo'),cur=sel.value;
+ sel.innerHTML='<option value="">Todas las tipologías</option>'+tipos.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('');
+ sel.value=tipos.includes(cur)?cur:'';
+ const q=$('eQ').value.trim().toLowerCase(),fe=$('eEstado').value,ft=sel.value;
+ const list=EXPS.filter(e=>(!q||e.nombre.toLowerCase().includes(q))&&(!fe||expEstado(e.id)===fe)&&(!ft||PARS.some(p=>p.expediente_id===e.id&&p.tipo===ft)));
+ $('eCount').textContent=list.length+' de '+EXPS.length+' expedientes';
  $('exps').innerHTML='';
- EXPS.forEach(e=>{
+ list.forEach(e=>{
   const n=FOTOS.filter(f=>f.expediente_id===e.id).length;
   const np=PARS.filter(p=>p.expediente_id===e.id).length;
   const d=document.createElement('div');d.className='exp';
-  d.innerHTML=`<div><b>${esc(e.nombre)}</b><br><small>${np} parcelas · ${n} fotos</small>${vacBadge(e)}</div>`;
+  const tp=[...new Set(PARS.filter(p=>p.expediente_id===e.id).map(p=>p.tipo).filter(Boolean))].join(', ');
+  d.innerHTML=`<div><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${COLOR[expEstado(e.id)]};margin-right:6px"></span><b>${esc(e.nombre)}</b><br><small>${np} parcelas · ${n} fotos${tp?' · '+esc(tp):''}</small>${vacBadge(e)}</div>`;
   const bx=document.createElement('div');
   const add=(t,cls,fn,dis)=>{const b=document.createElement('button');b.className='btn '+cls;b.textContent=t;b.disabled=!!dis;b.onclick=()=>fn(b);bx.appendChild(b)};
   add('Descargar ZIP','',b=>zipExp(e,b),!n);
@@ -565,18 +578,14 @@ function renderExps(){
   add('Editar','g',()=>openEdit(e));
   add('Eliminar','r',()=>delExp(e));
   d.appendChild(bx);
-  const withInfo=PARS.filter(p=>p.expediente_id===e.id&&kindsOf(p.tipo).length);
-  if(withInfo.length){
-   const sub=document.createElement('div');sub.style.cssText='flex-basis:100%;border-top:1px solid #eee;padding-top:8px';
-   withInfo.forEach(p=>{
-    const r=document.createElement('div');r.style.cssText='display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px;margin-bottom:4px';
-    const l=document.createElement('span');l.textContent=fmt(p.ref_sigpac)+' · '+p.tipo;
-    infoBadges(p).forEach(b=>{const t=document.createElement('b');t.textContent='  '+b.t;t.style.color=b.c;l.appendChild(t)});
-    const btn=document.createElement('button');btn.className='btn g';btn.style.margin='0';
-    btn.textContent=infoBadges(p).length?'Editar información':'Añadir información';
-    btn.onclick=()=>openInfo(p);r.append(l,btn);sub.appendChild(r);
-   });
-   d.appendChild(sub);
+  if(kindsExp(e).length){
+   const sub=document.createElement('div');sub.style.cssText='flex-basis:100%;border-top:1px solid #eee;padding-top:8px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px';
+   const l=document.createElement('span');l.textContent='Información';
+   const bs=infoBadges(e);
+   bs.forEach(b=>{const t=document.createElement('b');t.textContent='  '+b.t;t.style.color=b.c;l.appendChild(t)});
+   const btn=document.createElement('button');btn.className='btn g';btn.style.margin='0';
+   btn.textContent=bs.length?'Editar información':'Añadir información';
+   btn.onclick=()=>openInfo(e);sub.append(l,btn);d.appendChild(sub);
   }
   $('exps').appendChild(d);
  });
