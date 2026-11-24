@@ -533,6 +533,167 @@ function infoBadges(e){
  return out;
 }
 
+// ====== DOCUMENTOS ======
+// ====== GENERAR DOCUMENTOS WORD (rellena los modelos en el navegador) ======
+const WNS='http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+const W14='http://schemas.microsoft.com/office/word/2010/wordml';
+const XMLNS='http://www.w3.org/XML/1998/namespace';
+
+// ajusta las columnas de la tabla de comprobación al texto, para que no se parta a mitad de palabra
+function measureTw(text,pt,bold){
+ if(typeof document!=='undefined'){
+  const c=measureTw.c||(measureTw.c=document.createElement('canvas').getContext('2d'));
+  c.font=(bold?'bold ':'')+pt+'pt Arial';return c.measureText(text).width*15;
+ }
+ let w=0;for(const ch of text)w+=(/[A-ZÁÉÍÓÚÑ]/.test(ch)?0.68:ch===' '?0.28:0.52)*pt*20*(bold?1.08:1);
+ return w;
+}
+function autoFitTable(doc,tags,ptext,totalW){
+ const tbl=tags(doc.documentElement,'tbl').find(t=>/COMPROBACI/.test(ptext(t)));if(!tbl)return;
+ const rows=tags(tbl,'tr').filter(r=>r.parentNode===tbl);
+ const cells=r=>Array.from(r.childNodes).filter(c=>c.localName==='tc');
+ if(!rows.length||cells(rows[0]).length!==3)return;
+ const PAD=300;let n1=0,n2=0;
+ rows.forEach((r,i)=>{
+  const c=cells(r);
+  if(i>0)n1=Math.max(n1,measureTw(ptext(c[0]).trim(),9,false)+PAD);
+  n2=Math.max(n2,measureTw(ptext(c[1]).trim(),9,false)*1.12+PAD);
+ });
+ const min3=Math.max(1300,measureTw('Observaciones',9,true)+PAD);
+ const n0=measureTw(ptext(cells(rows[0])[0]).trim(),9,true)*1.05+PAD;
+ let w1=Math.round(n1),w2=Math.round(Math.min(Math.max(n2,900),totalW-w1-min3));
+ if(w1+w2<n0)w1=Math.round(n0-w2);
+ const w3=totalW-w1-w2;
+ const W3=[w1,w2,w3];
+ const grid=tags(tbl,'gridCol');grid.forEach((g,i)=>g.setAttributeNS(WNS,'w:w',String(W3[i])));
+ rows.forEach(r=>cells(r).forEach((c,i)=>{
+  const tcW=tags(c,'tcW')[0];if(tcW){tcW.setAttributeNS(WNS,'w:w',String(W3[i]));tcW.setAttributeNS(WNS,'w:type','dxa')}
+ }));
+ // el título del encabezado ocupa las dos primeras columnas, así no se parte en varias líneas
+ const h=cells(rows[0]);
+ if(h.length===3&&ptext(h[1]).trim()===''){
+  const pr0=tags(h[0],'tcPr')[0],tcw=tags(h[0],'tcW')[0];
+  if(pr0&&tcw){
+   tcw.setAttributeNS(WNS,'w:w',String(w1+w2));
+   const gs=doc.createElementNS(WNS,'w:gridSpan');gs.setAttributeNS(WNS,'w:val','2');
+   pr0.insertBefore(gs,tcw.nextSibling);
+   rows[0].removeChild(h[1]);
+  }
+ }
+ const pr=tags(tbl,'tblPr')[0];
+ const tw=tags(pr,'tblW')[0];if(tw){tw.setAttributeNS(WNS,'w:w',String(totalW));tw.setAttributeNS(WNS,'w:type','dxa')}
+ if(!tags(pr,'tblLayout')[0]){
+  const lay=doc.createElementNS(WNS,'w:tblLayout');lay.setAttributeNS(WNS,'w:type','fixed');
+  const look=tags(pr,'tblLook')[0];look?pr.insertBefore(lay,look):pr.appendChild(lay);
+ }
+}
+async function fillDocx(buf,markers,rows,outType){
+ const zip=await JSZip.loadAsync(buf);
+ const xml=await zip.file('word/document.xml').async('string');
+ const doc=new DOMParser().parseFromString(xml,'application/xml');
+ const tags=(n,t)=>Array.from(n.getElementsByTagNameNS(WNS,t));
+ const ptext=n=>tags(n,'t').map(t=>t.textContent).join('');
+ function setPara(p,text){
+  const runs=tags(p,'r');let rPr=null;
+  const src=runs[0]?tags(runs[0],'rPr')[0]:(tags(p,'pPr')[0]?tags(tags(p,'pPr')[0],'rPr')[0]:null);
+  if(src)rPr=src.cloneNode(true);
+  runs.forEach(r=>r.parentNode.removeChild(r));
+  const r=doc.createElementNS(WNS,'w:r');if(rPr)r.appendChild(rPr);
+  const t=doc.createElementNS(WNS,'w:t');t.setAttributeNS(XMLNS,'xml:space','preserve');t.appendChild(doc.createTextNode(text));
+  r.appendChild(t);p.appendChild(r);
+ }
+ // 1) marcadores A1, B1, C1, D1...
+ const paras=tags(doc.documentElement,'p');
+ Object.keys(markers).forEach(k=>{const p=paras.find(p=>ptext(p).trim()===k);if(p)setPara(p,markers[k])});
+ // 2) tabla de SIGPAC
+ const trs=tags(doc.documentElement,'tr');
+ const hi=trs.findIndex(r=>/Provincia/.test(ptext(r))&&/Municipio/.test(ptext(r)));
+ if(hi>=0){
+  const head=trs[hi],tbl=head.parentNode,ncol=tags(head,'tc').length;
+  const empties=[];
+  for(let i=hi+1;i<trs.length&&trs[i].parentNode===tbl&&ptext(trs[i])==='';i++)empties.push(trs[i]);
+  const tpl=empties[empties.length-1];
+  let last=empties.length?empties[0].previousSibling:head;
+  while(last&&last.nodeType!==1)last=last.previousSibling;
+  const stripIds=n=>{[n,...tags(n,'p')].forEach(x=>{['paraId','textId'].forEach(a=>{if(x.removeAttributeNS)x.removeAttributeNS(W14,a)})})};
+  rows.forEach((vals,i)=>{
+   let tr=empties[i];
+   if(!tr){tr=tpl.cloneNode(true);stripIds(tr);tbl.insertBefore(tr,last.nextSibling)}
+   last=tr;
+   Array.from(tr.childNodes).filter(c=>c.localName==='tc').forEach((tc,j)=>{
+    const p=tags(tc,'p')[0];if(p)setPara(p,vals[j]??'');
+   });
+  });
+  empties.slice(rows.length).forEach(tr=>tbl.removeChild(tr));
+ }
+ // 3) ancho de la tabla de comprobación igual al de las demás tablas
+ const grids=tags(doc.documentElement,'tbl').map(t=>tags(t,'gridCol').map(c=>+c.getAttributeNS(WNS,'w')||0).reduce((a,b)=>a+b,0)).filter(x=>x>0&&x<=9026);
+ autoFitTable(doc,tags,ptext,Math.max(...grids,7850));
+ let out=new XMLSerializer().serializeToString(doc).replace(/^<\?xml[^>]*\?>\s*/,'');
+ zip.file('word/document.xml','<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'+out);
+ const clean=new JSZip();
+ for(const name of Object.keys(zip.files)){const f=zip.files[name];if(f.dir)continue;clean.file(name,await f.async('uint8array'),{createFolders:false,date:f.date})}
+ return clean.generateAsync({type:outType||'blob',mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',compression:'DEFLATE'});
+}
+
+const DOCS={
+ vacuno:{file:'plantillas/vacuno.docx',title:'Vacuno de carne'},
+ razas:{file:'plantillas/razas.docx',title:'Raza'},
+ frutos:{file:'plantillas/frutos-secos.docx',title:'Frutos secos riesgo de desertificación'},
+ olivar:{file:'plantillas/olivar-dificultades.docx',title:'Olivar con dificultades'}
+};
+function docsFor(e){
+ const ts=PARS.filter(p=>p.expediente_id===e.id).map(p=>String(p.tipo||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase());
+ const any=re=>ts.some(t=>re.test(t)),k=[];
+ if(any(/vacuno/))k.push('vacuno');
+ if(any(/razas?/))k.push('razas');
+ if(any(/secano|secos/))k.push('frutos');
+ if(any(/dificultad/))k.push('olivar');
+ return k;
+}
+const fmtN=n=>Number(n).toLocaleString('es-ES',{maximumFractionDigits:2});
+function docMarkers(e,key){
+ const inf=e.info||{},need=(c,m)=>{if(!c)throw new Error(m)};
+ if(key==='vacuno'||key==='razas'){
+  const g=inf.ganado;need(g,'Rellena primero la información de animales');
+  const P=key==='vacuno'?'A':'B',m={};
+  m[P+'1']=String(g.censo);m[P+'2']=String(g.contados);m[P+'3']=String(g.vendidos);m[P+'4']=String(g.muertos);m[P+'5']=String(g.nacidos);
+  if(key==='razas'){
+   const r=inf.raza;need(r&&r.nombre,'Indica la raza en la información del expediente');
+   m.B6=r.ok?'Se ha comprobado y la raza es la indicada: '+r.nombre:'Se ha comprobado y es otra raza: '+r.nombre;
+  }
+  return m;
+ }
+ if(key==='frutos'){
+  const r=inf.riego;need(r&&r.x>0&&r.y>0,'Falta el marco de plantación');
+  return {C1:'Se ha comprobado y es '+(r.si?'riego':'secano'),C2:fmtN(r.x)+' x '+fmtN(r.y)+' m',C3:arbHa(r.x,r.y).toLocaleString('es-ES')+' árboles/ha'};
+ }
+ const d=inf.dificultad;need(d&&d.tipo,'Indica si es secano o riego');
+ return {D1:'Se ha comprobado y es '+d.tipo};
+}
+function docRows(e){
+ return PARS.filter(p=>p.expediente_id===e.id)
+  .sort((a,b)=>fmt(a.ref_sigpac).localeCompare(fmt(b.ref_sigpac),undefined,{numeric:true}))
+  .map(p=>{
+   const q=fmt(p.ref_sigpac).split('/');
+   return [q[0],q[1],q[4],q[5],q[6]||'',(geomM2(p.geom)/10000).toLocaleString('es-ES',{minimumFractionDigits:2,maximumFractionDigits:2})];
+  });
+}
+async function genDoc(e,key){
+ const D=DOCS[key],markers=docMarkers(e,key),rows=docRows(e);
+ const r=await fetch(D.file);if(!r.ok)throw new Error('No encuentro la plantilla '+D.file);
+ const blob=await fillDocx(await r.arrayBuffer(),markers,rows,'blob');
+ const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+ a.download=D.title+'_'+String(e.nombre).replace(/[\\/:*?"<>|]+/g,'_').trim()+'.docx';a.click();
+}
+async function genDocs(e,btn){
+ const keys=docsFor(e);if(!keys.length)return toast('Este expediente no tiene un tipo con modelo');
+ const txt=btn.textContent;btn.disabled=true;btn.textContent='Generando…';
+ try{for(const k of keys)await genDoc(e,k);toast(keys.length>1?'Documentos generados':'Documento generado')}
+ catch(er){toast(er.message||'Error al generar el documento')}
+ btn.disabled=false;btn.textContent=txt;
+}
+
 // ====== DESCARGAS ======
 $('eQ').oninput=()=>renderExps();
 $('eEstado').onchange=()=>renderExps();
@@ -565,7 +726,11 @@ function renderExps(){
    bs.forEach(b=>{const t=document.createElement('b');t.textContent='  '+b.t;t.style.color=b.c;l.appendChild(t)});
    const btn=document.createElement('button');btn.className='btn g';btn.style.margin='0';
    btn.textContent=bs.length?'Editar información':'Añadir información';
-   btn.onclick=()=>openInfo(e);sub.append(l,btn);d.appendChild(sub);
+   btn.onclick=()=>openInfo(e);
+   const gb=document.createElement('button');gb.className='btn b';gb.style.margin='0';gb.textContent='Generar documento';
+   gb.onclick=()=>genDocs(e,gb);
+   const bx2=document.createElement('div');bx2.style.cssText='display:flex;gap:6px;flex-wrap:wrap';bx2.append(btn,gb);
+   sub.append(l,bx2);d.appendChild(sub);
   }
   $('exps').appendChild(d);
  });
