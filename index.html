@@ -88,7 +88,7 @@ input,select{width:100%;padding:10px;margin:4px 0;border:1px solid #ccc;border-r
    <div id="pList"></div>
   </div>
   <div id="downloads"><h2>Expedientes <button class="btn g" id="logout" style="float:right">Salir</button></h2>
-   <div style="margin-bottom:12px"><button class="btn b" id="imp">Importar Excel</button> <small style="color:#555">Columnas: expediente · referencia SIGPAC · tipo</small></div>
+   <div style="margin-bottom:12px"><button class="btn b" id="imp">Importar Excel</button> <small style="color:#555">Columnas: expediente · referencia SIGPAC · tipo · NIF · titular</small></div>
    <input type="file" id="xl" accept=".xlsx,.xls,.csv" hidden>
    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">
     <input id="eQ" placeholder="Buscar expediente…" style="flex:2 1 160px;margin:0">
@@ -103,6 +103,7 @@ input,select{width:100%;padding:10px;margin:4px 0;border:1px solid #ccc;border-r
 <div class="modal" id="addModal"><div class="card">
  <h3 id="mTitle">Añadir expediente</h3>
  <input id="expName" placeholder="Nombre del expediente">
+ <div style="display:flex;gap:6px"><input id="expNif" placeholder="NIF" style="flex:1"><input id="expTit" placeholder="Titular" style="flex:2"></div>
  <datalist id="tiposList"></datalist>
  <div id="rows"></div>
  <button class="btn g" id="addRow">+ Parcela</button>
@@ -141,6 +142,13 @@ input,select{width:100%;padding:10px;margin:4px 0;border:1px solid #ccc;border-r
   </div>
  </div>
  <div style="margin-top:12px"><button class="btn" id="iSave">Guardar</button><button class="btn g" id="iCancel">Cancelar</button></div>
+</div></div>
+<div class="modal" id="techModal"><div class="card">
+ <h3>Imprimir documento</h3>
+ <label style="font-size:13px;color:#555">Técnico/a que realiza el control</label>
+ <input id="tName" autocomplete="name" placeholder="Nombre y apellidos">
+ <small id="tInfo" style="color:#555;display:block;margin:6px 0"></small>
+ <div style="margin-top:10px"><button class="btn b" id="tGo">Generar</button><button class="btn g" id="tCancel">Cancelar</button></div>
 </div></div>
 <input type="file" id="file" accept="image/*" capture="environment" hidden>
 <div id="msg"></div>
@@ -331,7 +339,8 @@ $('file').onchange=async e=>{
 };
 async function finalizar(p){
  if(!confirm('¿Marcar parcela como finalizada?'))return;
- await sb.from('parcelas').update({estado:'finalizado'}).eq('id',p.id);
+ const r=await sb.from('parcelas').update({estado:'finalizado',fecha_fin:todayStr()}).eq('id',p.id);
+ if(r.error)return toast(r.error.message);
  map.closePopup();load();
 }
 
@@ -344,9 +353,9 @@ function addRow(ref='',tipo='',pid=null){
  if(pid){d.querySelector('.ref').disabled=true;d.querySelector('.x').onclick=()=>{removed.push(pid);d.remove()}}
  $('rows').appendChild(d);
 }
-$('fab').onclick=()=>{editId=null;removed=[];$('mTitle').textContent='Añadir expediente';$('expName').value='';$('rows').innerHTML='';addRow();$('addModal').style.display='flex'};
+$('fab').onclick=()=>{editId=null;removed=[];$('mTitle').textContent='Añadir expediente';$('expName').value='';$('expNif').value='';$('expTit').value='';$('rows').innerHTML='';addRow();$('addModal').style.display='flex'};
 function openEdit(e){
- editId=e.id;removed=[];$('mTitle').textContent='Editar expediente';$('expName').value=e.nombre;$('rows').innerHTML='';
+ editId=e.id;removed=[];$('mTitle').textContent='Editar expediente';$('expName').value=e.nombre;$('expNif').value=e.nif||'';$('expTit').value=e.titular||'';$('rows').innerHTML='';
  PARS.filter(p=>p.expediente_id===e.id).forEach(p=>addRow(fmt(p.ref_sigpac),p.tipo||'',p.id));
  addRow();$('addModal').style.display='flex';
 }
@@ -365,6 +374,10 @@ async function getGeom(ref){
 }
 $('save').onclick=async()=>{
  const nombre=$('expName').value.trim();
+ const nif=$('expNif').value.trim(),titular=$('expTit').value.trim();
+ const ex0=editId?EXPS.find(x=>x.id===editId):null,extra={};
+ if(nif!==((ex0&&ex0.nif)||''))extra.nif=nif||null;
+ if(titular!==((ex0&&ex0.titular)||''))extra.titular=titular||null;
  const all=[...document.querySelectorAll('#rows .row')];
  const olds=all.filter(r=>r.dataset.pid).map(r=>({id:r.dataset.pid,tipo:norm(r.querySelector('.tipo').value)}));
  const news=all.filter(r=>!r.dataset.pid).map(r=>({ref:fmt(r.querySelector('.ref').value),tipo:norm(r.querySelector('.tipo').value)})).filter(r=>r.ref);
@@ -374,7 +387,7 @@ $('save').onclick=async()=>{
   const geoms=await Promise.all(news.map(r=>getGeom(r.ref)));
   let id=editId;
   if(id){
-   let r=await sb.from('expedientes').update({nombre}).eq('id',id);if(r.error)throw r.error;
+   let r=await sb.from('expedientes').update({nombre,...extra}).eq('id',id);if(r.error)throw r.error;
    await Promise.all(olds.map(o=>sb.from('parcelas').update({tipo:o.tipo}).eq('id',o.id)));
    if(removed.length){
     const paths=FOTOS.filter(f=>removed.includes(f.parcela_id)).map(f=>f.path);
@@ -382,7 +395,7 @@ $('save').onclick=async()=>{
     r=await sb.from('parcelas').delete().in('id',removed);if(r.error)throw r.error;
    }
   }else{
-   const r=await sb.from('expedientes').insert({nombre}).select().single();if(r.error)throw r.error;id=r.data.id;
+   const r=await sb.from('expedientes').insert({nombre,...extra}).select().single();if(r.error)throw r.error;id=r.data.id;
   }
   if(news.length){
    const r=await sb.from('parcelas').insert(news.map((r,i)=>({expediente_id:id,ref_sigpac:r.ref,tipo:r.tipo,geom:geoms[i],estado:'pendiente'})));
@@ -414,12 +427,12 @@ $('xl').onchange=async ev=>{
   const items=[],seen=new Set();let last='';
   rows.forEach((r,i)=>{
    const c0=String(r[0]??'').trim();if(c0)last=c0;
-   const ref=fmt(r[1]),tipo=norm(String(r[2]??''));
+   const ref=fmt(r[1]),tipo=norm(String(r[2]??'')),nif=String(r[3]??'').trim(),tit=String(r[4]??'').trim();
    if(!c0&&!ref&&!tipo)return;
    if(!valid(ref)){if(i>0)fallos.push((ref||'(vacía)')+' · fila '+(i+1)+': referencia no válida');return}
    if(!last){fallos.push(ref+' · fila '+(i+1)+': sin expediente');return}
    const k=last.toLowerCase()+'|'+ref;if(seen.has(k)){dup++;return}seen.add(k);
-   items.push({exp:last,ref,tipo});
+   items.push({exp:last,ref,tipo,nif,tit});
   });
   if(!items.length){alert('No he encontrado parcelas. Revisa que las columnas sean: expediente, referencia SIGPAC, tipo.');throw 0}
   // geometrías por tandas de 10
@@ -434,7 +447,7 @@ $('xl').onchange=async ev=>{
   const groups=new Map();
   items.forEach(it=>{
    if(it.err){fallos.push(it.ref+' ('+it.exp+'): '+it.err);return}
-   const k=it.exp.toLowerCase();if(!groups.has(k))groups.set(k,{nombre:it.exp,list:[]});groups.get(k).list.push(it);
+   const k=it.exp.toLowerCase();if(!groups.has(k))groups.set(k,{nombre:it.exp,list:[],nif:'',tit:''});const G=groups.get(k);G.list.push(it);if(!G.nif&&it.nif)G.nif=it.nif;if(!G.tit&&it.tit)G.tit=it.tit;
   });
   btn.textContent='Guardando…';
   for(const [k,g] of groups){
@@ -442,10 +455,12 @@ $('xl').onchange=async ev=>{
     let ex=EXPS.find(e=>e.nombre.trim().toLowerCase()===k),id,nuevo=false;
     let list=g.list;
     if(ex){
-     id=ex.id;const have=new Set(PARS.filter(p=>p.expediente_id===id).map(p=>fmt(p.ref_sigpac)));
+     id=ex.id;
+     {const up={};if(g.nif)up.nif=g.nif;if(g.tit)up.titular=g.tit;if(Object.keys(up).length){const r2=await sb.from('expedientes').update(up).eq('id',id);if(r2.error)throw r2.error}}
+     const have=new Set(PARS.filter(p=>p.expediente_id===id).map(p=>fmt(p.ref_sigpac)));
      list=list.filter(it=>{if(have.has(it.ref)){dup++;return false}return true});
     }else{
-     const r=await sb.from('expedientes').insert({nombre:g.nombre}).select().single();if(r.error)throw r.error;
+     const r=await sb.from('expedientes').insert(Object.assign({nombre:g.nombre},g.nif?{nif:g.nif}:{},g.tit?{titular:g.tit}:{})).select().single();if(r.error)throw r.error;
      id=r.data.id;nuevo=true;
     }
     if(list.length){
@@ -587,7 +602,7 @@ function autoFitTable(doc,tags,ptext,totalW){
   const look=tags(pr,'tblLook')[0];look?pr.insertBefore(lay,look):pr.appendChild(lay);
  }
 }
-async function fillDocx(buf,markers,rows,outType){
+async function fillDocx(buf,markers,rows,outType,F){
  const zip=await JSZip.loadAsync(buf);
  const xml=await zip.file('word/document.xml').async('string');
  const doc=new DOMParser().parseFromString(xml,'application/xml');
@@ -605,6 +620,28 @@ async function fillDocx(buf,markers,rows,outType){
  // 1) marcadores A1, B1, C1, D1...
  const paras=tags(doc.documentElement,'p');
  Object.keys(markers).forEach(k=>{const p=paras.find(p=>ptext(p).trim()===k);if(p)setPara(p,markers[k])});
+ // 1b) titular, NIF, técnico y fecha del control
+ F=F||{};
+ const nz=t=>t.replace(/\s+/g,' ').trim().toLowerCase();
+ const tcs=r=>Array.from(r.childNodes).filter(c=>c.localName==='tc');
+ function addRun(p,text){
+  const runs=tags(p,'r'),src=runs.length?tags(runs[runs.length-1],'rPr')[0]:null;
+  const r=doc.createElementNS(WNS,'w:r');
+  if(src){const rp=src.cloneNode(true);['b','bCs'].forEach(n=>tags(rp,n).forEach(x=>rp.removeChild(x)));r.appendChild(rp)}
+  const t=doc.createElementNS(WNS,'w:t');t.setAttributeNS(XMLNS,'xml:space','preserve');t.appendChild(doc.createTextNode(text));
+  r.appendChild(t);p.appendChild(r);
+ }
+ const append=(label,val)=>{if(!val)return;const p=paras.find(p=>nz(ptext(p))===label);if(p)addRun(p,' '+val)};
+ append('titular:',F.titular);append('nif:',F.nif);
+ append('técnico/s que realiza el control:',F.tecnico);append('fecha en la que se realiza el control:',F.fecha);
+ append('técnico/a que realiza el control:',F.tecnico);
+ const allTr=tags(doc.documentElement,'tr');
+ const fillCell=(label,val)=>{
+  if(!val)return;
+  const tr=allTr.find(r=>{const c=tcs(r);return c.length===2&&nz(ptext(c[0]))===label});
+  if(tr){const p=tags(tcs(tr)[1],'p')[0];if(p)setPara(p,val)}
+ };
+ fillCell('técnico/a que realiza el control',F.tecnico);fillCell('fecha de realización del control',F.fecha);
  // 2) tabla de SIGPAC
  const trs=tags(doc.documentElement,'tr');
  const hi=trs.findIndex(r=>/Provincia/.test(ptext(r))&&/Municipio/.test(ptext(r)));
@@ -679,20 +716,40 @@ function docRows(e){
    return [q[0],q[1],q[4],q[5],q[6]||'',(geomM2(p.geom)/10000).toLocaleString('es-ES',{minimumFractionDigits:2,maximumFractionDigits:2})];
   });
 }
-async function genDoc(e,key){
+function finDate(e){
+ const ds=PARS.filter(p=>p.expediente_id===e.id&&p.fecha_fin).map(p=>p.fecha_fin).sort();
+ return ds.length?ds[ds.length-1]:null;
+}
+async function genDoc(e,key,tech){
  const D=DOCS[key],markers=docMarkers(e,key),rows=docRows(e);
+ const F={titular:e.titular||'',nif:e.nif||'',tecnico:tech,fecha:fmtDia(finDate(e)||todayStr())};
  const r=await fetch(D.file);if(!r.ok)throw new Error('No encuentro la plantilla '+D.file);
- const blob=await fillDocx(await r.arrayBuffer(),markers,rows,'blob');
+ const blob=await fillDocx(await r.arrayBuffer(),markers,rows,'blob',F);
  const a=document.createElement('a');a.href=URL.createObjectURL(blob);
  a.download=D.title+'_'+String(e.nombre).replace(/[\\/:*?"<>|]+/g,'_').trim()+'.docx';a.click();
 }
-async function genDocs(e,btn){
- const keys=docsFor(e);if(!keys.length)return toast('Este expediente no tiene un tipo con modelo');
- const txt=btn.textContent;btn.disabled=true;btn.textContent='Generando…';
- try{for(const k of keys)await genDoc(e,k);toast(keys.length>1?'Documentos generados':'Documento generado')}
- catch(er){toast(er.message||'Error al generar el documento')}
- btn.disabled=false;btn.textContent=txt;
+let techExp=null;
+function openTech(e){
+ if(!docsFor(e).length)return toast('Este expediente no tiene un tipo con modelo');
+ techExp=e;
+ let n='';try{n=localStorage.getItem('tecnico')||''}catch(_){}
+ $('tName').value=n;
+ const fd=finDate(e);
+ $('tInfo').textContent='Fecha del documento: '+fmtDia(fd||todayStr())+(fd?' (día en que se finalizó)':' (hoy: el expediente aún no está finalizado)');
+ $('techModal').style.display='flex';
 }
+$('tCancel').onclick=()=>$('techModal').style.display='none';
+$('tGo').onclick=async()=>{
+ const name=$('tName').value.trim();if(!name)return toast('Escribe el nombre del técnico');
+ try{localStorage.setItem('tecnico',name)}catch(_){}
+ const b=$('tGo'),txt=b.textContent;b.disabled=true;b.textContent='Generando…';
+ try{
+  const keys=docsFor(techExp);
+  for(const k of keys)await genDoc(techExp,k,name);
+  $('techModal').style.display='none';toast(keys.length>1?'Documentos generados':'Documento generado');
+ }catch(er){toast(er.message||'Error al generar el documento')}
+ b.disabled=false;b.textContent=txt;
+};
 
 // ====== DESCARGAS ======
 $('eQ').oninput=()=>renderExps();
@@ -727,8 +784,8 @@ function renderExps(){
    const btn=document.createElement('button');btn.className='btn g';btn.style.margin='0';
    btn.textContent=bs.length?'Editar información':'Añadir información';
    btn.onclick=()=>openInfo(e);
-   const gb=document.createElement('button');gb.className='btn b';gb.style.margin='0';gb.textContent='Generar documento';
-   gb.onclick=()=>genDocs(e,gb);
+   const gb=document.createElement('button');gb.className='btn b';gb.style.margin='0';gb.textContent='Imprimir documento';
+   gb.onclick=()=>openTech(e);
    const bx2=document.createElement('div');bx2.style.cssText='display:flex;gap:6px;flex-wrap:wrap';bx2.append(btn,gb);
    sub.append(l,bx2);d.appendChild(sub);
   }
