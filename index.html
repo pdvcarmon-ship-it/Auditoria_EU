@@ -92,7 +92,7 @@ input,select{width:100%;padding:10px;margin:4px 0;border:1px solid #ccc;border-r
    <div id="pList"></div>
   </div>
   <div id="downloads"><h2>Expedientes <button class="btn g" id="logout" style="float:right">Salir</button></h2>
-   <div style="margin-bottom:12px"><button class="btn b" id="imp">Importar Excel</button> <small style="color:#555">Columnas: nombre · referencia SIGPAC · tipo · NIF · titular · expediente</small></div>
+   <div style="margin-bottom:12px"><button class="btn b" id="imp">Importar Excel</button> <small style="color:#555">Columnas: nombre · referencia SIGPAC · tipo · NIF · titular · expediente · código de explotación</small></div>
    <input type="file" id="xl" accept=".xlsx,.xls,.csv" hidden>
    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">
     <input id="eQ" placeholder="Buscar expediente…" style="flex:2 1 160px;margin:0">
@@ -109,6 +109,7 @@ input,select{width:100%;padding:10px;margin:4px 0;border:1px solid #ccc;border-r
  <input id="expName" placeholder="Nombre del expediente">
  <div style="display:flex;gap:6px"><input id="expNif" placeholder="NIF" style="flex:1"><input id="expTit" placeholder="Titular" style="flex:2"></div>
  <input id="expNum" placeholder="Expediente (EXPEDIENTE SU 2026)">
+ <input id="expCod" placeholder="Código de explotación (vacuno y razas)">
  <datalist id="tiposList"></datalist>
  <div id="rows"></div>
  <button class="btn g" id="addRow">+ Parcela</button>
@@ -368,9 +369,9 @@ function addRow(ref='',tipo='',pid=null){
  if(pid){d.querySelector('.ref').disabled=true;d.querySelector('.x').onclick=()=>{removed.push(pid);d.remove()}}
  $('rows').appendChild(d);
 }
-$('fab').onclick=()=>{editId=null;removed=[];$('mTitle').textContent='Añadir expediente';$('expName').value='';$('expNif').value='';$('expTit').value='';$('expNum').value='';$('rows').innerHTML='';addRow();$('addModal').style.display='flex'};
+$('fab').onclick=()=>{editId=null;removed=[];$('mTitle').textContent='Añadir expediente';$('expName').value='';$('expNif').value='';$('expTit').value='';$('expNum').value='';$('expCod').value='';$('rows').innerHTML='';addRow();$('addModal').style.display='flex'};
 function openEdit(e){
- editId=e.id;removed=[];$('mTitle').textContent='Editar expediente';$('expName').value=e.nombre;$('expNif').value=e.nif||'';$('expTit').value=e.titular||'';$('expNum').value=e.num_exp||'';$('rows').innerHTML='';
+ editId=e.id;removed=[];$('mTitle').textContent='Editar expediente';$('expName').value=e.nombre;$('expNif').value=e.nif||'';$('expTit').value=e.titular||'';$('expNum').value=e.num_exp||'';$('expCod').value=e.cod_expl||'';$('rows').innerHTML='';
  PARS.filter(p=>p.expediente_id===e.id).forEach(p=>addRow(fmt(p.ref_sigpac),p.tipo||'',p.id));
  addRow();$('addModal').style.display='flex';
 }
@@ -389,11 +390,12 @@ async function getGeom(ref){
 }
 $('save').onclick=async()=>{
  const nombre=$('expName').value.trim();
- const nif=$('expNif').value.trim(),titular=$('expTit').value.trim(),numexp=$('expNum').value.trim();
+ const nif=$('expNif').value.trim(),titular=$('expTit').value.trim(),numexp=$('expNum').value.trim(),codexp=$('expCod').value.trim();
  const ex0=editId?EXPS.find(x=>x.id===editId):null,extra={};
  if(nif!==((ex0&&ex0.nif)||''))extra.nif=nif||null;
  if(titular!==((ex0&&ex0.titular)||''))extra.titular=titular||null;
  if(numexp!==((ex0&&ex0.num_exp)||''))extra.num_exp=numexp||null;
+ if(codexp!==((ex0&&ex0.cod_expl)||''))extra.cod_expl=codexp||null;
  const all=[...document.querySelectorAll('#rows .row')];
  const olds=all.filter(r=>r.dataset.pid).map(r=>({id:r.dataset.pid,tipo:norm(r.querySelector('.tipo').value)}));
  const news=all.filter(r=>!r.dataset.pid).map(r=>({ref:fmt(r.querySelector('.ref').value),tipo:norm(r.querySelector('.tipo').value)})).filter(r=>r.ref);
@@ -443,12 +445,12 @@ $('xl').onchange=async ev=>{
   const items=[],seen=new Set();let last='';
   rows.forEach((r,i)=>{
    const c0=String(r[0]??'').trim();if(c0)last=c0;
-   const ref=fmt(r[1]),tipo=norm(String(r[2]??'')),nif=String(r[3]??'').trim(),tit=String(r[4]??'').trim(),num=String(r[5]??'').trim();
+   const ref=fmt(r[1]),tipo=norm(String(r[2]??'')),nif=String(r[3]??'').trim(),tit=String(r[4]??'').trim(),num=String(r[5]??'').trim(),cod=String(r[6]??'').trim();
    if(!c0&&!ref&&!tipo)return;
    if(!valid(ref)){if(i>0)fallos.push((ref||'(vacía)')+' · fila '+(i+1)+': referencia no válida');return}
    if(!last){fallos.push(ref+' · fila '+(i+1)+': sin expediente');return}
    const k=last.toLowerCase()+'|'+ref;if(seen.has(k)){dup++;return}seen.add(k);
-   items.push({exp:last,ref,tipo,nif,tit,num});
+   items.push({exp:last,ref,tipo,nif,tit,num,cod});
   });
   if(!items.length){alert('No he encontrado parcelas. Revisa que las columnas sean: expediente, referencia SIGPAC, tipo.');throw 0}
   // geometrías por tandas de 10
@@ -463,7 +465,7 @@ $('xl').onchange=async ev=>{
   const groups=new Map();
   items.forEach(it=>{
    if(it.err){fallos.push(it.ref+' ('+it.exp+'): '+it.err);return}
-   const k=it.exp.toLowerCase();if(!groups.has(k))groups.set(k,{nombre:it.exp,list:[],nif:'',tit:'',num:''});const G=groups.get(k);G.list.push(it);if(!G.nif&&it.nif)G.nif=it.nif;if(!G.tit&&it.tit)G.tit=it.tit;if(!G.num&&it.num)G.num=it.num;
+   const k=it.exp.toLowerCase();if(!groups.has(k))groups.set(k,{nombre:it.exp,list:[],nif:'',tit:'',num:'',cod:''});const G=groups.get(k);G.list.push(it);if(!G.nif&&it.nif)G.nif=it.nif;if(!G.tit&&it.tit)G.tit=it.tit;if(!G.num&&it.num)G.num=it.num;if(!G.cod&&it.cod)G.cod=it.cod;
   });
   btn.textContent='Guardando…';
   for(const [k,g] of groups){
@@ -472,11 +474,11 @@ $('xl').onchange=async ev=>{
     let list=g.list;
     if(ex){
      id=ex.id;
-     {const up={};if(g.nif)up.nif=g.nif;if(g.tit)up.titular=g.tit;if(g.num)up.num_exp=g.num;if(Object.keys(up).length){const r2=await sb.from('expedientes').update(up).eq('id',id);if(r2.error)throw r2.error}}
+     {const up={};if(g.nif)up.nif=g.nif;if(g.tit)up.titular=g.tit;if(g.num)up.num_exp=g.num;if(g.cod)up.cod_expl=g.cod;if(Object.keys(up).length){const r2=await sb.from('expedientes').update(up).eq('id',id);if(r2.error)throw r2.error}}
      const have=new Set(PARS.filter(p=>p.expediente_id===id).map(p=>fmt(p.ref_sigpac)));
      list=list.filter(it=>{if(have.has(it.ref)){dup++;return false}return true});
     }else{
-     const r=await sb.from('expedientes').insert(Object.assign({nombre:g.nombre},g.nif?{nif:g.nif}:{},g.tit?{titular:g.tit}:{},g.num?{num_exp:g.num}:{})).select().single();if(r.error)throw r.error;
+     const r=await sb.from('expedientes').insert(Object.assign({nombre:g.nombre},g.nif?{nif:g.nif}:{},g.tit?{titular:g.tit}:{},g.num?{num_exp:g.num}:{},g.cod?{cod_expl:g.cod}:{})).select().single();if(r.error)throw r.error;
      id=r.data.id;nuevo=true;
     }
     if(list.length){
@@ -715,6 +717,7 @@ async function fillDocx(buf,markers,rows,outType,F,blocks){
  const append=(label,val)=>{if(!val)return;const p=paras.find(p=>nz(ptext(p))===label);if(p)addRun(p,' '+val)};
  append('titular:',F.titular);append('nif:',F.nif);
  if(F.numexp){const pe=paras.find(p=>/^expedientes?\s+su\s+\d{4}:$/.test(nz(ptext(p))));if(pe)addRun(pe,' '+F.numexp)}
+ if(F.codexp){const pc=paras.find(p=>/^c[oó]digo\s+(de\s+)?(explotaci[oó]n|exploraci[oó]n):$/.test(nz(ptext(p))));if(pc)addRun(pc,' '+F.codexp)}
  append('técnico/s que realiza el control:',F.tecnico);append('fecha en la que se realiza el control:',F.fecha);
  append('técnico/a que realiza el control:',F.tecnico);
  const allTr=tags(doc.documentElement,'tr');
@@ -876,7 +879,7 @@ const MESES=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','
 async function genDoc(e,key,tech,lugar){
  const vin=key==='vinedo',D=DOCS[key],markers=vin?{}:docMarkers(e,key),rows=vin?[]:docRows(e),blocks=vin?vinBlocks(e):null;
  const iso=finDate(e)||todayStr(),dp=iso.split('-');
- const F={titular:e.titular||'',nif:e.nif||'',numexp:e.num_exp||'',tecnico:tech,lugar,fecha:fmtDia(iso),dia:String(+dp[2]),mes:MESES[+dp[1]-1],anio:dp[0]};
+ const F={titular:e.titular||'',nif:e.nif||'',numexp:e.num_exp||'',codexp:e.cod_expl||'',tecnico:tech,lugar,fecha:fmtDia(iso),dia:String(+dp[2]),mes:MESES[+dp[1]-1],anio:dp[0]};
  const r=await fetch(D.file);if(!r.ok)throw new Error('No encuentro la plantilla '+D.file);
  const blob=await fillDocx(await r.arrayBuffer(),markers,rows,'blob',F,blocks);
  const a=document.createElement('a');a.href=URL.createObjectURL(blob);
