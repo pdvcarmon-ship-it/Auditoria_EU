@@ -611,7 +611,7 @@ async function fillDocx(buf,markers,rows,outType,F){
  function setPara(p,text){
   const runs=tags(p,'r');let rPr=null;
   const src=runs[0]?tags(runs[0],'rPr')[0]:(tags(p,'pPr')[0]?tags(tags(p,'pPr')[0],'rPr')[0]:null);
-  if(src)rPr=src.cloneNode(true);
+  if(src){rPr=src.cloneNode(true);tags(rPr,'highlight').forEach(x=>x.parentNode.removeChild(x));if(!runs[0])['b','bCs'].forEach(n=>tags(rPr,n).forEach(x=>x.parentNode.removeChild(x)))}
   runs.forEach(r=>r.parentNode.removeChild(r));
   const r=doc.createElementNS(WNS,'w:r');if(rPr)r.appendChild(rPr);
   const t=doc.createElementNS(WNS,'w:t');t.setAttributeNS(XMLNS,'xml:space','preserve');t.appendChild(doc.createTextNode(text));
@@ -627,7 +627,7 @@ async function fillDocx(buf,markers,rows,outType,F){
  function addRun(p,text){
   const runs=tags(p,'r'),src=runs.length?tags(runs[runs.length-1],'rPr')[0]:null;
   const r=doc.createElementNS(WNS,'w:r');
-  if(src){const rp=src.cloneNode(true);['b','bCs'].forEach(n=>tags(rp,n).forEach(x=>rp.removeChild(x)));r.appendChild(rp)}
+  if(src){const rp=src.cloneNode(true);['b','bCs','highlight'].forEach(n=>tags(rp,n).forEach(x=>rp.removeChild(x)));r.appendChild(rp)}
   const t=doc.createElementNS(WNS,'w:t');t.setAttributeNS(XMLNS,'xml:space','preserve');t.appendChild(doc.createTextNode(text));
   r.appendChild(t);p.appendChild(r);
  }
@@ -639,9 +639,10 @@ async function fillDocx(buf,markers,rows,outType,F){
  const fillCell=(label,val)=>{
   if(!val)return;
   const tr=allTr.find(r=>{const c=tcs(r);return c.length===2&&nz(ptext(c[0]))===label});
-  if(tr){const p=tags(tcs(tr)[1],'p')[0];if(p)setPara(p,val)}
+  if(tr){const cell=tcs(tr)[1],ps=tags(cell,'p');if(ps[0]){setPara(ps[0],val);ps.slice(1).forEach(q=>{if(ptext(q)==='')q.parentNode.removeChild(q)})}}
  };
  fillCell('técnico/a que realiza el control',F.tecnico);fillCell('fecha de realización del control',F.fecha);
+ fillCell('beneficiario',F.titular);fillCell('cif',F.nif);
  // 2) tabla de SIGPAC
  const trs=tags(doc.documentElement,'tr');
  const hi=trs.findIndex(r=>/Provincia/.test(ptext(r))&&/Municipio/.test(ptext(r)));
