@@ -88,7 +88,7 @@ input,select{width:100%;padding:10px;margin:4px 0;border:1px solid #ccc;border-r
    <div id="pList"></div>
   </div>
   <div id="downloads"><h2>Expedientes <button class="btn g" id="logout" style="float:right">Salir</button></h2>
-   <div style="margin-bottom:12px"><button class="btn b" id="imp">Importar Excel</button> <small style="color:#555">Columnas: expediente · referencia SIGPAC · tipo · NIF · titular</small></div>
+   <div style="margin-bottom:12px"><button class="btn b" id="imp">Importar Excel</button> <small style="color:#555">Columnas: nombre · referencia SIGPAC · tipo · NIF · titular · expediente</small></div>
    <input type="file" id="xl" accept=".xlsx,.xls,.csv" hidden>
    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">
     <input id="eQ" placeholder="Buscar expediente…" style="flex:2 1 160px;margin:0">
@@ -104,6 +104,7 @@ input,select{width:100%;padding:10px;margin:4px 0;border:1px solid #ccc;border-r
  <h3 id="mTitle">Añadir expediente</h3>
  <input id="expName" placeholder="Nombre del expediente">
  <div style="display:flex;gap:6px"><input id="expNif" placeholder="NIF" style="flex:1"><input id="expTit" placeholder="Titular" style="flex:2"></div>
+ <input id="expNum" placeholder="Expediente (EXPEDIENTE SU 2026)">
  <datalist id="tiposList"></datalist>
  <div id="rows"></div>
  <button class="btn g" id="addRow">+ Parcela</button>
@@ -147,6 +148,8 @@ input,select{width:100%;padding:10px;margin:4px 0;border:1px solid #ccc;border-r
  <h3>Imprimir documento</h3>
  <label style="font-size:13px;color:#555">Técnico/a que realiza el control</label>
  <input id="tName" autocomplete="name" placeholder="Nombre y apellidos">
+ <label style="font-size:13px;color:#555">Lugar donde se realiza (para la línea "En ___, a ___ de ___")</label>
+ <input id="tLugar" autocomplete="off" placeholder="Ej. Sevilla">
  <small id="tInfo" style="color:#555;display:block;margin:6px 0"></small>
  <div style="margin-top:10px"><button class="btn b" id="tGo">Generar</button><button class="btn g" id="tCancel">Cancelar</button></div>
 </div></div>
@@ -353,9 +356,9 @@ function addRow(ref='',tipo='',pid=null){
  if(pid){d.querySelector('.ref').disabled=true;d.querySelector('.x').onclick=()=>{removed.push(pid);d.remove()}}
  $('rows').appendChild(d);
 }
-$('fab').onclick=()=>{editId=null;removed=[];$('mTitle').textContent='Añadir expediente';$('expName').value='';$('expNif').value='';$('expTit').value='';$('rows').innerHTML='';addRow();$('addModal').style.display='flex'};
+$('fab').onclick=()=>{editId=null;removed=[];$('mTitle').textContent='Añadir expediente';$('expName').value='';$('expNif').value='';$('expTit').value='';$('expNum').value='';$('rows').innerHTML='';addRow();$('addModal').style.display='flex'};
 function openEdit(e){
- editId=e.id;removed=[];$('mTitle').textContent='Editar expediente';$('expName').value=e.nombre;$('expNif').value=e.nif||'';$('expTit').value=e.titular||'';$('rows').innerHTML='';
+ editId=e.id;removed=[];$('mTitle').textContent='Editar expediente';$('expName').value=e.nombre;$('expNif').value=e.nif||'';$('expTit').value=e.titular||'';$('expNum').value=e.num_exp||'';$('rows').innerHTML='';
  PARS.filter(p=>p.expediente_id===e.id).forEach(p=>addRow(fmt(p.ref_sigpac),p.tipo||'',p.id));
  addRow();$('addModal').style.display='flex';
 }
@@ -374,10 +377,11 @@ async function getGeom(ref){
 }
 $('save').onclick=async()=>{
  const nombre=$('expName').value.trim();
- const nif=$('expNif').value.trim(),titular=$('expTit').value.trim();
+ const nif=$('expNif').value.trim(),titular=$('expTit').value.trim(),numexp=$('expNum').value.trim();
  const ex0=editId?EXPS.find(x=>x.id===editId):null,extra={};
  if(nif!==((ex0&&ex0.nif)||''))extra.nif=nif||null;
  if(titular!==((ex0&&ex0.titular)||''))extra.titular=titular||null;
+ if(numexp!==((ex0&&ex0.num_exp)||''))extra.num_exp=numexp||null;
  const all=[...document.querySelectorAll('#rows .row')];
  const olds=all.filter(r=>r.dataset.pid).map(r=>({id:r.dataset.pid,tipo:norm(r.querySelector('.tipo').value)}));
  const news=all.filter(r=>!r.dataset.pid).map(r=>({ref:fmt(r.querySelector('.ref').value),tipo:norm(r.querySelector('.tipo').value)})).filter(r=>r.ref);
@@ -427,12 +431,12 @@ $('xl').onchange=async ev=>{
   const items=[],seen=new Set();let last='';
   rows.forEach((r,i)=>{
    const c0=String(r[0]??'').trim();if(c0)last=c0;
-   const ref=fmt(r[1]),tipo=norm(String(r[2]??'')),nif=String(r[3]??'').trim(),tit=String(r[4]??'').trim();
+   const ref=fmt(r[1]),tipo=norm(String(r[2]??'')),nif=String(r[3]??'').trim(),tit=String(r[4]??'').trim(),num=String(r[5]??'').trim();
    if(!c0&&!ref&&!tipo)return;
    if(!valid(ref)){if(i>0)fallos.push((ref||'(vacía)')+' · fila '+(i+1)+': referencia no válida');return}
    if(!last){fallos.push(ref+' · fila '+(i+1)+': sin expediente');return}
    const k=last.toLowerCase()+'|'+ref;if(seen.has(k)){dup++;return}seen.add(k);
-   items.push({exp:last,ref,tipo,nif,tit});
+   items.push({exp:last,ref,tipo,nif,tit,num});
   });
   if(!items.length){alert('No he encontrado parcelas. Revisa que las columnas sean: expediente, referencia SIGPAC, tipo.');throw 0}
   // geometrías por tandas de 10
@@ -447,7 +451,7 @@ $('xl').onchange=async ev=>{
   const groups=new Map();
   items.forEach(it=>{
    if(it.err){fallos.push(it.ref+' ('+it.exp+'): '+it.err);return}
-   const k=it.exp.toLowerCase();if(!groups.has(k))groups.set(k,{nombre:it.exp,list:[],nif:'',tit:''});const G=groups.get(k);G.list.push(it);if(!G.nif&&it.nif)G.nif=it.nif;if(!G.tit&&it.tit)G.tit=it.tit;
+   const k=it.exp.toLowerCase();if(!groups.has(k))groups.set(k,{nombre:it.exp,list:[],nif:'',tit:'',num:''});const G=groups.get(k);G.list.push(it);if(!G.nif&&it.nif)G.nif=it.nif;if(!G.tit&&it.tit)G.tit=it.tit;if(!G.num&&it.num)G.num=it.num;
   });
   btn.textContent='Guardando…';
   for(const [k,g] of groups){
@@ -456,11 +460,11 @@ $('xl').onchange=async ev=>{
     let list=g.list;
     if(ex){
      id=ex.id;
-     {const up={};if(g.nif)up.nif=g.nif;if(g.tit)up.titular=g.tit;if(Object.keys(up).length){const r2=await sb.from('expedientes').update(up).eq('id',id);if(r2.error)throw r2.error}}
+     {const up={};if(g.nif)up.nif=g.nif;if(g.tit)up.titular=g.tit;if(g.num)up.num_exp=g.num;if(Object.keys(up).length){const r2=await sb.from('expedientes').update(up).eq('id',id);if(r2.error)throw r2.error}}
      const have=new Set(PARS.filter(p=>p.expediente_id===id).map(p=>fmt(p.ref_sigpac)));
      list=list.filter(it=>{if(have.has(it.ref)){dup++;return false}return true});
     }else{
-     const r=await sb.from('expedientes').insert(Object.assign({nombre:g.nombre},g.nif?{nif:g.nif}:{},g.tit?{titular:g.tit}:{})).select().single();if(r.error)throw r.error;
+     const r=await sb.from('expedientes').insert(Object.assign({nombre:g.nombre},g.nif?{nif:g.nif}:{},g.tit?{titular:g.tit}:{},g.num?{num_exp:g.num}:{})).select().single();if(r.error)throw r.error;
      id=r.data.id;nuevo=true;
     }
     if(list.length){
@@ -633,6 +637,7 @@ async function fillDocx(buf,markers,rows,outType,F){
  }
  const append=(label,val)=>{if(!val)return;const p=paras.find(p=>nz(ptext(p))===label);if(p)addRun(p,' '+val)};
  append('titular:',F.titular);append('nif:',F.nif);
+ if(F.numexp){const pe=paras.find(p=>/^expedientes?\s+su\s+\d{4}:$/.test(nz(ptext(p))));if(pe)addRun(pe,' '+F.numexp)}
  append('técnico/s que realiza el control:',F.tecnico);append('fecha en la que se realiza el control:',F.fecha);
  append('técnico/a que realiza el control:',F.tecnico);
  const allTr=tags(doc.documentElement,'tr');
@@ -643,6 +648,11 @@ async function fillDocx(buf,markers,rows,outType,F){
  };
  fillCell('técnico/a que realiza el control',F.tecnico);fillCell('fecha de realización del control',F.fecha);
  fillCell('beneficiario',F.titular);fillCell('cif',F.nif);
+ // línea final: "En ___, a ___ de ___ de ____"
+ if(F.lugar&&F.dia){
+  const fp=paras.find(p=>/^en\s*,\s*a\s*de\s+[a-záéíóúñ]+\s+de\s+\d{4}$/.test(nz(ptext(p))));
+  if(fp)setPara(fp,'En '+F.lugar+', a '+F.dia+' de '+F.mes+' de '+F.anio);
+ }
  // 2) tabla de SIGPAC
  const trs=tags(doc.documentElement,'tr');
  const hi=trs.findIndex(r=>/Provincia/.test(ptext(r))&&/Municipio/.test(ptext(r)));
@@ -721,9 +731,11 @@ function finDate(e){
  const ds=PARS.filter(p=>p.expediente_id===e.id&&p.fecha_fin).map(p=>p.fecha_fin).sort();
  return ds.length?ds[ds.length-1]:null;
 }
-async function genDoc(e,key,tech){
+const MESES=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+async function genDoc(e,key,tech,lugar){
  const D=DOCS[key],markers=docMarkers(e,key),rows=docRows(e);
- const F={titular:e.titular||'',nif:e.nif||'',tecnico:tech,fecha:fmtDia(finDate(e)||todayStr())};
+ const iso=finDate(e)||todayStr(),dp=iso.split('-');
+ const F={titular:e.titular||'',nif:e.nif||'',numexp:e.num_exp||'',tecnico:tech,lugar,fecha:fmtDia(iso),dia:String(+dp[2]),mes:MESES[+dp[1]-1],anio:dp[0]};
  const r=await fetch(D.file);if(!r.ok)throw new Error('No encuentro la plantilla '+D.file);
  const blob=await fillDocx(await r.arrayBuffer(),markers,rows,'blob',F);
  const a=document.createElement('a');a.href=URL.createObjectURL(blob);
@@ -733,20 +745,22 @@ let techExp=null;
 function openTech(e){
  if(!docsFor(e).length)return toast('Este expediente no tiene un tipo con modelo');
  techExp=e;
- let n='';try{n=localStorage.getItem('tecnico')||''}catch(_){}
- $('tName').value=n;
+ let n='',lg='';try{n=localStorage.getItem('tecnico')||'';lg=localStorage.getItem('lugar')||''}catch(_){}
+ $('tName').value=n;$('tLugar').value=lg;
  const fd=finDate(e);
  $('tInfo').textContent='Fecha del documento: '+fmtDia(fd||todayStr())+(fd?' (día en que se finalizó)':' (hoy: el expediente aún no está finalizado)');
  $('techModal').style.display='flex';
 }
 $('tCancel').onclick=()=>$('techModal').style.display='none';
 $('tGo').onclick=async()=>{
- const name=$('tName').value.trim();if(!name)return toast('Escribe el nombre del técnico');
- try{localStorage.setItem('tecnico',name)}catch(_){}
+ const name=$('tName').value.trim(),lugar=$('tLugar').value.trim();
+ if(!name)return toast('Escribe el nombre del técnico');
+ if(!lugar)return toast('Escribe el lugar');
+ try{localStorage.setItem('tecnico',name);localStorage.setItem('lugar',lugar)}catch(_){}
  const b=$('tGo'),txt=b.textContent;b.disabled=true;b.textContent='Generando…';
  try{
   const keys=docsFor(techExp);
-  for(const k of keys)await genDoc(techExp,k,name);
+  for(const k of keys)await genDoc(techExp,k,name,lugar);
   $('techModal').style.display='none';toast(keys.length>1?'Documentos generados':'Documento generado');
  }catch(er){toast(er.message||'Error al generar el documento')}
  b.disabled=false;b.textContent=txt;
