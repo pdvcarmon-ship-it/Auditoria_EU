@@ -52,6 +52,10 @@ input,select{width:100%;padding:10px;margin:4px 0;border:1px solid #ccc;border-r
 .ptag{font-size:12px;border-radius:6px;padding:1px 6px;background:#fef9c3;color:#854d0e;margin-left:6px}
 #cGrid button.all{background:#dcfce7;border-color:#16a34a}
 #cGrid button.all small{color:#166534}
+.vrow{display:flex;align-items:center;gap:14px;padding:6px 0;border-bottom:1px solid #eee}
+.vrow span{flex:1;font-size:14px}
+.vrow label{display:flex;gap:5px;align-items:center;font-size:14px}
+.vrow input{width:auto;margin:0}
 </style></head>
 <body>
 <div id="app">
@@ -152,6 +156,14 @@ input,select{width:100%;padding:10px;margin:4px 0;border:1px solid #ccc;border-r
  <input id="tLugar" autocomplete="off" placeholder="Ej. Sevilla">
  <small id="tInfo" style="color:#555;display:block;margin:6px 0"></small>
  <div style="margin-top:10px"><button class="btn b" id="tGo">Generar</button><button class="btn g" id="tCancel">Cancelar</button></div>
+</div></div>
+<div class="modal" id="vinModal"><div class="card">
+ <h3 id="vTitle">Datos de viñedo</h3>
+ <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><b style="font-size:14px">Parcelas <span id="vN"></span></b><button class="btn g" id="vAll" style="margin:0">Todas</button><button class="btn g" id="vNone" style="margin:0">Ninguna</button></div>
+ <div id="vPars" style="max-height:180px;overflow:auto;border:1px solid #ccc;border-radius:8px;padding:4px;margin:6px 0"></div>
+ <div id="vForm"></div>
+ <small style="color:#555;display:block;margin-top:6px">Marca una o varias parcelas y pulsa "Aplicar". ✓ = nuevo, ✗ = no nuevo. Puedes repetirlo con otros valores para otras parcelas.</small>
+ <div style="margin-top:10px"><button class="btn" id="vApply">Aplicar a las seleccionadas</button><button class="btn g" id="vClose">Cerrar</button></div>
 </div></div>
 <input type="file" id="file" accept="image/*" capture="environment" hidden>
 <div id="msg"></div>
@@ -302,7 +314,7 @@ function openPopup(p){
  add('Añadir foto','',()=>{currentPar=p;$('file').click()});
  if(n>0&&p.estado!=='finalizado')add('Finalizado','r',()=>finalizar(p));
  add('Editar expediente','g',()=>{map.closePopup();openEdit(EXPS.find(x=>x.id===p.expediente_id))});
- const ex=EXPS.find(x=>x.id===p.expediente_id);if(ex&&kindsExp(ex).length)add('Información','g',()=>{map.closePopup();openInfo(ex)});
+ const ex=EXPS.find(x=>x.id===p.expediente_id);if(ex&&kindsExp(ex).length)add('Información','g',()=>{map.closePopup();if(kindsExp(ex).some(x=>x!=='vinedo'))openInfo(ex);else openVin(ex,p.id)});
  L.popup().setLatLng(c).setContent(el).openOn(map);
 }
 
@@ -487,6 +499,7 @@ const kindsOf=t=>{
  if(/razas?/.test(s))k.push('raza');
  if(/secano|secos/.test(s))k.push('riego');
  if(/dificultad/.test(s))k.push('dificultad');
+ if(/reestructuracion/.test(s))k.push('vinedo');
  return k;
 };
 const kindsExp=e=>{const k=new Set();PARS.filter(p=>p.expediente_id===e.id).forEach(p=>kindsOf(p.tipo).forEach(x=>k.add(x)));return [...k]};
@@ -549,8 +562,72 @@ function infoBadges(e){
  if(k.includes('riego')&&inf.riego&&inf.riego.x>0&&inf.riego.y>0)out.push({t:arbHa(inf.riego.x,inf.riego.y)+' árb/ha'+(inf.riego.si?' · Riego':''),c:'#854d0e'});
  if(k.includes('dificultad')&&inf.dificultad&&inf.dificultad.tipo)out.push({t:inf.dificultad.tipo==='riego'?'Riego':'Secano',c:'#854d0e'});
  if(k.includes('raza')&&inf.raza&&inf.raza.nombre)out.push(inf.raza.ok?{t:'✓ Raza: '+inf.raza.nombre,c:'#16a34a'}:{t:'✗ Raza no correcta: '+inf.raza.nombre,c:'#dc2626'});
+ if(k.includes('vinedo')){const ps=PARS.filter(p=>p.expediente_id===e.id),n=ps.filter(p=>p.info&&p.info.vinedo).length;out.push({t:'Viñedo '+n+'/'+ps.length+' parcelas',c:(n&&n===ps.length)?'#16a34a':'#854d0e'})}
  return out;
 }
+function openAnyInfo(e){if(kindsExp(e).some(x=>x!=='vinedo'))openInfo(e);else openVin(e)}
+
+// ====== VIÑEDO: datos por parcela ======
+const VROWS=[['plantones','Plantones de vid'],['protectores','Protectores'],['alambre','Alambre'],['goteo','Goteo'],['tensores','Tensores'],['postes','Postes']];
+$('vForm').innerHTML=VROWS.map(([k,l])=>k==='goteo'
+ ?`<div class="vrow"><span>${l}</span><label><input type="checkbox" id="v_goteo_nuevo"> Nuevo</label><label><input type="checkbox" id="v_goteo_secano"> Secano</label></div>`
+ :`<div class="vrow"><span>${l}</span><label><input type="checkbox" id="v_${k}"> Nuevo</label></div>`).join('');
+function vGoteo(){const s=$('v_goteo_secano').checked;if(s)$('v_goteo_nuevo').checked=false;$('v_goteo_nuevo').disabled=s}
+$('v_goteo_secano').onchange=vGoteo;
+function vFormGet(){
+ const sec=$('v_goteo_secano').checked;
+ return {plantones:$('v_plantones').checked,protectores:$('v_protectores').checked,alambre:$('v_alambre').checked,goteo_nuevo:$('v_goteo_nuevo').checked&&!sec,goteo_secano:sec,tensores:$('v_tensores').checked,postes:$('v_postes').checked};
+}
+function vFormSet(v){
+ v=v||{};
+ ['plantones','protectores','alambre','tensores','postes'].forEach(k=>$('v_'+k).checked=!!v[k]);
+ $('v_goteo_secano').checked=!!v.goteo_secano;$('v_goteo_nuevo').checked=!!v.goteo_nuevo&&!v.goteo_secano;vGoteo();
+}
+function vSummary(v){
+ if(!v)return 'sin datos';
+ const m=b=>b?'✓':'✗';
+ return 'Plant.'+m(v.plantones)+' Prot.'+m(v.protectores)+' Alamb.'+m(v.alambre)+' Goteo:'+(v.goteo_secano?'secano':m(v.goteo_nuevo))+' Tens.'+m(v.tensores)+' Post.'+m(v.postes);
+}
+let vinExp=null;const VSEL=new Set();
+function renderVin(){
+ vinExp=EXPS.find(x=>x.id===vinExp.id)||vinExp;
+ const ps=PARS.filter(p=>p.expediente_id===vinExp.id).sort((a,b)=>fmt(a.ref_sigpac).localeCompare(fmt(b.ref_sigpac),undefined,{numeric:true}));
+ [...VSEL].forEach(id=>{if(!ps.some(p=>p.id===id))VSEL.delete(id)});
+ const box=$('vPars');box.innerHTML='';
+ ps.forEach(p=>{
+  const l=document.createElement('label');l.style.cssText='display:flex;gap:8px;align-items:flex-start;font-size:13px;padding:4px 2px';
+  const c=document.createElement('input');c.type='checkbox';c.style.cssText='width:auto;margin:2px 0';c.checked=VSEL.has(p.id);
+  c.onchange=()=>{
+   c.checked?VSEL.add(p.id):VSEL.delete(p.id);
+   if(VSEL.size===1){const one=ps.find(x=>VSEL.has(x.id));vFormSet(one.info&&one.info.vinedo)}
+   $('vN').textContent=VSEL.size?'('+VSEL.size+')':'';
+  };
+  const t=document.createElement('span'),b=document.createElement('b'),sm=document.createElement('small');
+  b.textContent=fmt(p.ref_sigpac);sm.style.cssText='display:block;color:#555';sm.textContent=vSummary(p.info&&p.info.vinedo);
+  t.append(b,sm);l.append(c,t);box.appendChild(l);
+ });
+ if(!ps.length)box.textContent='Este expediente no tiene parcelas';
+ $('vN').textContent=VSEL.size?'('+VSEL.size+')':'';
+}
+function openVin(e,pid){
+ vinExp=e;VSEL.clear();vFormSet(null);
+ $('vTitle').textContent='Datos de viñedo · '+e.nombre;
+ if(pid){const one=PARS.find(x=>x.id===pid);if(one){VSEL.add(pid);vFormSet(one.info&&one.info.vinedo)}}
+ renderVin();$('vinModal').style.display='flex';
+}
+$('vAll').onclick=()=>{PARS.filter(p=>p.expediente_id===vinExp.id).forEach(p=>VSEL.add(p.id));renderVin()};
+$('vNone').onclick=()=>{VSEL.clear();renderVin()};
+$('vClose').onclick=()=>$('vinModal').style.display='none';
+$('vApply').onclick=async()=>{
+ if(!VSEL.size)return toast('Marca al menos una parcela');
+ const v=vFormGet(),ids=[...VSEL],b=$('vApply');b.disabled=true;
+ try{
+  const rs=await Promise.all(ids.map(id=>{const p=PARS.find(x=>x.id===id);return sb.from('parcelas').update({info:Object.assign({},p.info||{},{vinedo:v})}).eq('id',id)}));
+  const er=rs.find(r=>r.error);if(er)throw er.error;
+  await load();renderVin();toast('Aplicado a '+ids.length+' parcela'+(ids.length===1?'':'s'));
+ }catch(er){toast(er.message||'Error al guardar')}
+ b.disabled=false;
+};
 
 // ====== DOCUMENTOS ======
 // ====== GENERAR DOCUMENTOS WORD (rellena los modelos en el navegador) ======
@@ -606,7 +683,7 @@ function autoFitTable(doc,tags,ptext,totalW){
   const look=tags(pr,'tblLook')[0];look?pr.insertBefore(lay,look):pr.appendChild(lay);
  }
 }
-async function fillDocx(buf,markers,rows,outType,F){
+async function fillDocx(buf,markers,rows,outType,F,blocks){
  const zip=await JSZip.loadAsync(buf);
  const xml=await zip.file('word/document.xml').async('string');
  const doc=new DOMParser().parseFromString(xml,'application/xml');
@@ -653,10 +730,62 @@ async function fillDocx(buf,markers,rows,outType,F){
   const fp=paras.find(p=>/^en\s*,\s*a\s*de\s+[a-záéíóúñ]+\s+de\s+\d{4}$/.test(nz(ptext(p))));
   if(fp)setPara(fp,'En '+F.lugar+', a '+F.dia+' de '+F.mes+' de '+F.anio);
  }
+ // 1c) un bloque (tabla de SIGPAC + trabajos) por parcela: viñedo
+ const hasBlocks=!!(blocks&&blocks.length);
+ if(hasBlocks){
+  const tbl0=tags(doc.documentElement,'tbl').find(t=>tags(t,'p').some(p=>ptext(p).trim()==='E1'));
+  if(tbl0){
+   const rowsOf=t=>tags(t,'tr').filter(r=>r.parentNode===t);
+   const strip2=n=>{[n,...tags(n,'p'),...tags(n,'tr')].forEach(x=>{['paraId','textId'].forEach(a=>{if(x.removeAttributeNS)x.removeAttributeNS(W14,a)})})};
+   if(!tags(tbl0,'p').some(p=>ptext(p).trim()==='E6')){
+    const rt=rowsOf(tbl0).find(r=>tags(r,'p').some(p=>ptext(p).trim()==='E5'));
+    if(rt){
+     const nr=rt.cloneNode(true);strip2(nr);
+     tags(nr,'p').forEach(p=>{const t=ptext(p).trim();if(t==='E5')setPara(p,'E6');else if(/^tensores$/i.test(t))setPara(p,'Postes')});
+     rt.parentNode.insertBefore(nr,rt.nextSibling);
+    }
+   }
+   const tabs=[tbl0];
+   for(let i=1;i<blocks.length;i++){
+    const c=tbl0.cloneNode(true);strip2(c);
+    const sep=doc.createElementNS(WNS,'w:p'),prev=tabs[tabs.length-1];
+    prev.parentNode.insertBefore(sep,prev.nextSibling);
+    sep.parentNode.insertBefore(c,sep.nextSibling);
+    tabs.push(c);
+   }
+   // las tablas del viñedo se ensanchan al ancho de las demás para que los títulos no se partan
+   const gsum=t=>tags(t,'gridCol').map(c=>+c.getAttributeNS(WNS,'w')||0).reduce((x,y)=>x+y,0);
+   const base=gsum(tbl0),others=tags(doc.documentElement,'tbl').filter(t=>!tabs.includes(t)).map(gsum).filter(x=>x>0&&x<=9026);
+   const kk=base?Math.max(...others,base)/base:1;
+   if(kk>1.01)tabs.forEach(t=>{
+    tags(t,'gridCol').forEach(c=>c.setAttributeNS(WNS,'w:w',String(Math.round((+c.getAttributeNS(WNS,'w')||0)*kk))));
+    tags(t,'tcW').forEach(c=>{const w=+c.getAttributeNS(WNS,'w')||0;if(w)c.setAttributeNS(WNS,'w:w',String(Math.round(w*kk)))});
+    tags(t,'tblW').forEach(c=>{const w=+c.getAttributeNS(WNS,'w')||0;if(w&&c.getAttributeNS(WNS,'type')==='dxa')c.setAttributeNS(WNS,'w:w',String(Math.round(w*kk)))});
+   });
+   // cada bloque se mantiene entero en la misma página
+   tabs.forEach(t=>{
+    const rr=rowsOf(t);
+    rr.slice(0,-1).forEach(r=>tags(r,'p').forEach(p=>{
+     let pp=tags(p,'pPr')[0];
+     if(!pp){pp=doc.createElementNS(WNS,'w:pPr');p.insertBefore(pp,p.firstChild)}
+     if(tags(pp,'keepNext')[0])return;
+     const kn=doc.createElementNS(WNS,'w:keepNext'),ps=tags(pp,'pStyle')[0];
+     ps?pp.insertBefore(kn,ps.nextSibling):pp.insertBefore(kn,pp.firstChild);
+    }));
+   });
+   blocks.forEach((b,i)=>{
+    const t=tabs[i],rws=rowsOf(t);
+    const hi2=rws.findIndex(r=>/Provincia/.test(ptext(r))&&/Municipio/.test(ptext(r)));
+    const dr=rws[hi2+1];
+    if(dr)tcs(dr).forEach((tc,j)=>{const p=tags(tc,'p')[0];if(p)setPara(p,b.row[j]??'')});
+    Object.keys(b.markers).forEach(k=>{const p=tags(t,'p').find(p=>ptext(p).trim()===k);if(p)setPara(p,b.markers[k])});
+   });
+  }
+ }
  // 2) tabla de SIGPAC
  const trs=tags(doc.documentElement,'tr');
  const hi=trs.findIndex(r=>/Provincia/.test(ptext(r))&&/Municipio/.test(ptext(r)));
- if(hi>=0){
+ if(hi>=0&&!hasBlocks){
   const head=trs[hi],tbl=head.parentNode,ncol=tags(head,'tc').length;
   const empties=[];
   for(let i=hi+1;i<trs.length&&trs[i].parentNode===tbl&&ptext(trs[i])==='';i++)empties.push(trs[i]);
@@ -676,7 +805,7 @@ async function fillDocx(buf,markers,rows,outType,F){
  }
  // 3) ancho de la tabla de comprobación igual al de las demás tablas
  const grids=tags(doc.documentElement,'tbl').map(t=>tags(t,'gridCol').map(c=>+c.getAttributeNS(WNS,'w')||0).reduce((a,b)=>a+b,0)).filter(x=>x>0&&x<=9026);
- autoFitTable(doc,tags,ptext,Math.max(...grids,7850));
+ if(!hasBlocks)autoFitTable(doc,tags,ptext,Math.max(...grids,7850));
  let out=new XMLSerializer().serializeToString(doc).replace(/^<\?xml[^>]*\?>\s*/,'');
  zip.file('word/document.xml','<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'+out);
  const clean=new JSZip();
@@ -688,7 +817,8 @@ const DOCS={
  vacuno:{file:'plantillas/vacuno.docx',title:'Vacuno de carne'},
  razas:{file:'plantillas/razas.docx',title:'Raza'},
  frutos:{file:'plantillas/frutos-secos.docx',title:'Frutos secos riesgo de desertificación'},
- olivar:{file:'plantillas/olivar-dificultades.docx',title:'Olivar con dificultades'}
+ olivar:{file:'plantillas/olivar-dificultades.docx',title:'Olivar con dificultades'},
+ vinedo:{file:'plantillas/reestructuracion-vinedo.docx',title:'Reestructuración de viñedo'}
 };
 function docsFor(e){
  const ts=PARS.filter(p=>p.expediente_id===e.id).map(p=>String(p.tipo||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase());
@@ -697,6 +827,7 @@ function docsFor(e){
  if(any(/razas?/))k.push('razas');
  if(any(/secano|secos/))k.push('frutos');
  if(any(/dificultad/))k.push('olivar');
+ if(any(/reestructuracion/))k.push('vinedo');
  return k;
 }
 const fmtN=n=>Number(n).toLocaleString('es-ES',{maximumFractionDigits:2});
@@ -731,13 +862,23 @@ function finDate(e){
  const ds=PARS.filter(p=>p.expediente_id===e.id&&p.fecha_fin).map(p=>p.fecha_fin).sort();
  return ds.length?ds[ds.length-1]:null;
 }
+function vinBlocks(e){
+ const ps=PARS.filter(p=>p.expediente_id===e.id).sort((a,b)=>fmt(a.ref_sigpac).localeCompare(fmt(b.ref_sigpac),undefined,{numeric:true}));
+ const falta=ps.filter(p=>!(p.info&&p.info.vinedo));
+ if(!ps.length||falta.length)throw new Error('Faltan datos de viñedo en '+(falta.length||ps.length)+' parcela'+((falta.length||ps.length)===1?'':'s')+' (botón "Datos de viñedo")');
+ const nu=b=>b?'Nuevo':'No nuevo';
+ return ps.map(p=>{
+  const v=p.info.vinedo,q=fmt(p.ref_sigpac).split('/');
+  return {row:[q[0],q[1],q[4],q[5],q[6]||''],markers:{E1:nu(v.plantones),E2:nu(v.protectores),E3:nu(v.alambre),E4:v.goteo_secano?'':nu(v.goteo_nuevo),E5:nu(v.tensores),E6:nu(v.postes)}};
+ });
+}
 const MESES=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
 async function genDoc(e,key,tech,lugar){
- const D=DOCS[key],markers=docMarkers(e,key),rows=docRows(e);
+ const vin=key==='vinedo',D=DOCS[key],markers=vin?{}:docMarkers(e,key),rows=vin?[]:docRows(e),blocks=vin?vinBlocks(e):null;
  const iso=finDate(e)||todayStr(),dp=iso.split('-');
  const F={titular:e.titular||'',nif:e.nif||'',numexp:e.num_exp||'',tecnico:tech,lugar,fecha:fmtDia(iso),dia:String(+dp[2]),mes:MESES[+dp[1]-1],anio:dp[0]};
  const r=await fetch(D.file);if(!r.ok)throw new Error('No encuentro la plantilla '+D.file);
- const blob=await fillDocx(await r.arrayBuffer(),markers,rows,'blob',F);
+ const blob=await fillDocx(await r.arrayBuffer(),markers,rows,'blob',F,blocks);
  const a=document.createElement('a');a.href=URL.createObjectURL(blob);
  a.download=D.title+'_'+String(e.nombre).replace(/[\\/:*?"<>|]+/g,'_').trim()+'.docx';a.click();
 }
@@ -801,7 +942,10 @@ function renderExps(){
    btn.onclick=()=>openInfo(e);
    const gb=document.createElement('button');gb.className='btn b';gb.style.margin='0';gb.textContent='Imprimir documento';
    gb.onclick=()=>openTech(e);
-   const bx2=document.createElement('div');bx2.style.cssText='display:flex;gap:6px;flex-wrap:wrap';bx2.append(btn,gb);
+   const bx2=document.createElement('div');bx2.style.cssText='display:flex;gap:6px;flex-wrap:wrap';const kAll=kindsExp(e);
+   if(kAll.some(x=>x!=='vinedo'))bx2.append(btn);
+   if(kAll.includes('vinedo')){const vb=document.createElement('button');vb.className='btn g';vb.style.margin='0';vb.textContent='Datos de viñedo';vb.onclick=()=>openVin(e);bx2.append(vb)}
+   bx2.append(gb);
    sub.append(l,bx2);d.appendChild(sub);
   }
   $('exps').appendChild(d);
