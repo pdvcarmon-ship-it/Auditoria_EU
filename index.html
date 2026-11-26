@@ -646,6 +646,19 @@ function vPair(label,opts,z,kt,ku){
  s.style.flex='1.5';g.style.flex='1';w.append(s,g);
  return vFld(label+' · tipo / ¿primer uso?',w);
 }
+// varias opciones a la vez (tensor, poste de cabecera): se guardan como lista
+function vMulti(opts,val,on){
+ const cur=Array.isArray(val)?val.slice():(val?[val]:[]),d=mk('div','seg');d.style.flexWrap='wrap';
+ opts.forEach(([v,t])=>{
+  const b=mk('button','sg'+(cur.includes(v)?' on':''),t);b.type='button';b.style.flex='1 1 45%';
+  b.onclick=()=>{const i=cur.indexOf(v);i>=0?cur.splice(i,1):cur.push(v);b.classList.toggle('on',i<0);on(opts.map(o=>o[0]).filter(x=>cur.includes(x)))};
+  d.append(b);
+ });
+ return d;
+}
+function vPairM(label,opts,z,kt,ku){
+ return vFld(label+' · tipos (puedes marcar varios)',vMulti(opts,z[kt],v=>z[kt]=v),vFld('¿Primer uso?',vSeg(SN,z[ku],v=>z[ku]=v)));
+}
 function vZone(z,i){
  const c=mk('div','zc'),hd=mk('h4');hd.append(mk('span','','Zona '+LET[i]));
  if(VS.zonas.length>1){const x=mk('button','btn r','✕');x.type='button';x.style.margin='0';x.onclick=()=>{if(confirm('¿Quitar la zona '+LET[i]+'?')){VS.zonas.splice(i,1);vRender()}};hd.append(x)}
@@ -670,10 +683,10 @@ function vZone(z,i){
  c.append(vFld('Espaldera',vSeg(SN,z.esp,v=>{z.esp=v;vRender()})));
  if(z.esp==='S'){
   c.append(vFld('Nº de alambres',vIn(z.alam,v=>z.alam=v,'0','numeric')));
-  c.append(vPair('Poste de cabecera',O_POSTE,z,'pcT','pcU'));
+  c.append(vPairM('Poste de cabecera',O_POSTE,z,'pcT','pcU'));
   c.append(vPair('Poste intermedio',O_POSTE,z,'piT','piU'));
  }
- c.append(vPair('Tensor',O_TENS,z,'tenT','tenU'),vPair('Tutor',O_TUT,z,'tutT','tutU'),vPair('Sistema de sujeción',O_SUJ,z,'susT','susU'));
+ c.append(vPairM('Tensor',O_TENS,z,'tenT','tenU'),vPair('Tutor',O_TUT,z,'tutT','tutU'),vPair('Sistema de sujeción',O_SUJ,z,'susT','susU'));
  c.append(vFld('Observaciones de la zona',vIn(z.obs6,v=>z.obs6=v,'Opcional','text')));
  return c;
 }
@@ -1087,6 +1100,7 @@ function xlsxFill(xml,D,numF,fmtF){
  // 4) operaciones controladas y mediciones / 5) sistema de conducción, una fila por zona
  const qt=(n,u)=>{const v=numF(n);return(String(n??'').trim()!==''&&Number.isFinite(v))?fmtF(v)+(u==='Ud'?' Ud':' %'):''};
  const mf=(x,y)=>(numF(x)>0&&numF(y)>0)?fmtF(numF(x))+' x '+fmtF(numF(y)):'';
+ const jn=v=>Array.isArray(v)?v.join('-'):(v||'');
  const nn=v=>{const x=numF(v);return String(v??'').trim()!==''&&Number.isFinite(x)?x:''};
  for(let i=0;i<nz;i++){
   const z=D.zonas[i]||{},r5=R5+i,r6=R6+i,L=LET[i];
@@ -1098,8 +1112,8 @@ function xlsxFill(xml,D,numF,fmtF){
   set('N'+r5,z.obs5||'',4);fitRow(r5);
   const esp=z.esp==='S';
   set('A'+r6,L,7);
-  const v6={B:nn(z.prot),C:z.protT||'',D:z.protU||'',E:z.esp||'',F:esp?nn(z.alam):'',G:esp?z.pcT||'':'',H:esp?z.pcU||'':'',I:esp?z.piT||'':'',J:esp?z.piU||'':'',
-   K:z.tenT||'',L:z.tenU||'',M:z.tutT||'',N:z.tutU||'',O:z.susT||'',P:z.susU||''};
+  const v6={B:nn(z.prot),C:z.protT||'',D:z.protU||'',E:z.esp||'',F:esp?nn(z.alam):'',G:esp?jn(z.pcT):'',H:esp?z.pcU||'':'',I:esp?z.piT||'':'',J:esp?z.piU||'':'',
+   K:jn(z.tenT),L:z.tenU||'',M:z.tutT||'',N:z.tutU||'',O:z.susT||'',P:z.susU||''};
   Object.keys(v6).forEach(c=>set(c+r6,v6[c],7));
   set('Q'+r6,z.obs6||'',4);fitRow(r6);
  }
